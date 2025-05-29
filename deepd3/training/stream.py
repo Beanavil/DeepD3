@@ -86,7 +86,7 @@ class DataGeneratorStream(Sequence):
 
             # Augmenting the data
             if self.augment:
-                augmented = self.aug(image=image, 
+                augmented = self.aug(image=image.astype(np.uint8), 
                     mask1=dendrite.astype(np.uint8), 
                     mask2=spines.astype(np.uint8)) #augment image
                 

@@ -586,7 +586,7 @@ class addStackWidget(QWidget):
     def selectDendrite(self):
         """Select dendrite annotation file
         """
-        fn = QFileDialog.getOpenFileName(caption="Select dendrite tracings", filter="*.tif; *.swc")[0]
+        fn = QFileDialog.getOpenFileName(caption="Select dendrite tracings", filter="(*.tif *.swc)")[0]
 
         if fn:
             self.fn_d.setText(fn)
@@ -629,7 +629,7 @@ class addStackWidget(QWidget):
     def selectSpines(self):
         """Select a spine annotation
         """
-        fn = QFileDialog.getOpenFileName(caption="Select stack", filter="*.tif, *.mask")[0]
+        fn = QFileDialog.getOpenFileName(caption="Select stack", filter="(*.tif *.mask)")[0]
 
         if fn:
             self.fn_s.setText(fn)
