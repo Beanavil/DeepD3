@@ -138,3 +138,6 @@ examples/Training DeepD3 model UNet.ipynb
 
 # Wandb files
 wandb
+
+# Out directory
+out/
