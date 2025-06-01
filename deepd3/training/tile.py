@@ -3,10 +3,20 @@ import flammkuchen as fl
 import cv2
 import albumentations as A
 import random
+import tifffile as tf
+from typing import TypedDict, List
+from collections import namedtuple
+
+
+class Stack(TypedDict):
+    img: str
+    d_mask: str
+    s_masks: str
+    meta: str
 
 
 class TiledDataGenerator():
-    def __init__(self, fn, batch_size, samples_per_epoch=50000, size=(1, 128, 128), target_resolution=None, augment=True,
+    def __init__(self, batch_size, fn=List[Stack], samples_per_epoch=50000, size=(1, 128, 128), target_resolution=None, augment=True,
                  shuffle=True, seed=42, normalize=[-1, 1], min_content=None
                  ):
         """Data Generator that creates tiled data samples from an input image for training DeepD3.
@@ -15,7 +25,7 @@ class TiledDataGenerator():
         min_content anotated pixels are available in the correspondent masks.
 
         Args:
-            fn (str): The path to the training data file
+            fn (str): A list of paths to the data stacks. If only one element is provided, it should contain only a path for img for the d3set.
             batch_size (int): Batch size for training deep neural networks
             samples_per_epoch (int, optional): Samples used in each epoch. Defaults to 50000.
             size (tuple, optional): Shape of a single sample. Defaults to (1, 128, 128).
@@ -44,9 +54,13 @@ class TiledDataGenerator():
         self.min_content = float(
             size[1] * size[2] * 0.003) if min_content is None else min_content
 
-        self.d = fl.load(self.fn)
-        self.data = self.d['data']
-        self.meta = self.d['meta']
+        # Load data
+        if ('meta' in fn[0]):
+            self.load_raw()
+        else:
+            self.load_d3set()
+
+        self.batch_index = 0
 
         self.cur_tile_x = 0
         self.cur_tile_y = 0
@@ -55,11 +69,60 @@ class TiledDataGenerator():
         random.seed(self.seed)
         np.random.seed(self.seed)
 
-        # self.on_epoch_end() TODO: necessary?
+    def load_d3set(self):
+        d = fl.load(self.fn[0]['img'])
+        # stacks, dendrite, spines: [n_stacks][z,y,x]
+        self.data = d['data']
+        # [n_stacks]{Height,Width,Depth,Resolution_XY,Resolution_Z}
+        self.meta = d['meta'].iloc
+        self.n_stacks = len(d['meta'])
+
+    def load_raw(self):
+        # Load raw images as np arrays
+        img_file = self.fn[0]['img']
+        img = tf.imread(img_file)
+        d_mask = tf.imread(self.fn[0]['d_mask'])
+        s_masks = tf.imread(self.fn[0]['s_masks'])
+        # Original images are stored as (Z, X, Y)
+        img = np.transpose(img, axes=(0, 2, 1))
+        d_mask = np.transpose(d_mask, axes=(0, 2, 1))
+        s_masks = np.transpose(s_masks, axes=(0, 2, 1))
+        # Load metadata following d3set format
+        self.meta = []
+        MetaEntry = namedtuple(
+            'MetaEntry', ['Height', 'Width', 'Depth', 'Resolution_XY', 'Resolution_Z'])
+        for shape, resolution in zip(self.fn[0]['meta']['stack_shapes'], self.fn[0]['meta']['pixel_sizes']):
+            z, x, y = shape.sizes
+            res_z, res_x, res_y = resolution.sizes
+            meta_entry = MetaEntry(
+                Height=y,
+                Width=x,
+                Depth=z,
+                # Resolutions are in m, so we convert them to um (micrometer)
+                Resolution_XY=max(res_x * 1e+6, res_y * 1e+6),
+                Resolution_Z=res_z * 1e+6
+            )
+            self.meta.append(meta_entry)
+
+        # Assemble everything
+        self.data = {'stacks': {f"x{0}": img}, "dendrites": {
+            f"x{0}": d_mask}, "spines": {f"x{0}": s_masks}}
+        self.n_stacks = len(self.meta)
 
     def len_epoch(self):
         """Denotes the number of batches per epoch"""
         return self.samples_per_epoch // self.batch_size
+
+    def __iter__(self):
+        self.batch_index = 0
+        return self
+
+    def __next__(self):
+        if self.batch_index >= self.len_epoch():
+            raise StopIteration
+        batch = self.get_batch(self.batch_index)
+        self.batch_index += 1
+        return batch
 
     def get_batch(self, index):
         """Generate one batch of data
@@ -139,8 +202,8 @@ class TiledDataGenerator():
         Returns:
             list(np.ndarray, np.ndarray, np.ndarray): stack image with respective labels
         """
-        max_tile_y = self.meta.iloc[0].Height - self.size[1] + 1
-        max_tile_x = self.meta.iloc[0].Width - self.size[2] + 1
+        max_tile_y = self.meta[0].Height - self.size[1] + 1
+        max_tile_x = self.meta[0].Width - self.size[2] + 1
         for y in range(self.cur_tile_y, max_tile_y, self.size[1] // 2):
             start_tile_x = self.cur_tile_x if y == self.cur_tile_y else 0
             for x in range(start_tile_x, max_tile_x, self.size[2] // 2):
@@ -178,8 +241,8 @@ class TiledDataGenerator():
             size = self.size
 
         # sample random stack TODO: not random, sharpest
-        r_stack = np.random.choice(len(self.meta))
-        meta = self.meta.iloc[r_stack]
+        r_stack = np.random.choice(self.n_stacks)
+        meta = self.meta[r_stack]
 
         target_h = size[1]
         target_w = size[2]
@@ -214,7 +277,6 @@ class TiledDataGenerator():
         if (size[0] > meta.Depth-size[0]):
             return
 
-        # TODO: not random
         z_begin = np.random.choice(meta.Depth-size[0]+1)
         z_end = z_begin + size[0]
 
@@ -222,6 +284,14 @@ class TiledDataGenerator():
         tmp_stack = self.data['stacks'][f'x{r_stack}'][z_begin:z_end, y:y+h, x:x+w]
         tmp_dendrites = self.data['dendrites'][f'x{r_stack}'][z_begin:z_end, y:y+h, x:x+w]
         tmp_spines = self.data['spines'][f'x{r_stack}'][z_begin:z_end, y:y+h, x:x+w]
+
+        # Sanity checks
+        assert tmp_stack.shape == (
+            size[0], h, w), "Unexpected orig shape: {tmp_stack.shape} at x={x}, y={y}"
+        assert tmp_dendrites.shape == (
+            size[0], h, w), "Unexpected dendrite shape: {tmp_dendrites.shape} at x={x}, y={y}"
+        assert tmp_spines.shape == (
+            size[0], h, w), "Unexpected spines shape: {tmp_spines.shape} at x={x}, y={y}"
 
         # Data needs to be rescaled
         if scaling != 1:
