@@ -1,3 +1,7 @@
+# Local imports
+from utils import floodfill
+
+# External libraries imports
 import numpy as np
 import flammkuchen as fl
 import cv2
@@ -16,9 +20,21 @@ class Stack(TypedDict):
 
 
 class TiledDataGenerator():
-    def __init__(self, batch_size, fn=List[Stack], samples_per_epoch=50000, size=(1, 128, 128), target_resolution=None, augment=True,
-                 shuffle=True, seed=42, normalize=[-1, 1], min_content=None
-                 ):
+
+    def __init__(
+        self,
+        batch_size,
+        fn=List[Stack],
+        samples_per_epoch=50000,
+        size=(1, 128, 128),
+        target_resolution=None,
+        augment=True,
+        shuffle=True,
+        seed=42,
+        normalize=[-1, 1],
+        min_content=None,
+        floodfill=True,
+    ):
         """Data Generator that creates tiled data samples from an input image for training DeepD3.
         Essentially like DataGeneratorStream, but the output produced is not a stream, but a list of input tiles.
         Additionally, it only includes significant tiles in the output, with significant meaning that at least
@@ -37,6 +53,8 @@ class TiledDataGenerator():
             min_content (float): Hyper-parameter that stablishes the minimum content in image
                                  (annotated dendrite or spine), not considered if 0. Default
                                  to half the tile size in the XY plane.
+            floodfill (bool, optional): Whether to apply floodfill to the spines masks of the stacks
+                                        before taking the samples.
         """
 
         # Save settings
@@ -59,6 +77,11 @@ class TiledDataGenerator():
             self.load_raw()
         else:
             self.load_d3set()
+
+        # Set up floodfill, if required
+        self.floodfill = floodfill
+        if self.floodfill:
+            self.floodfilled = np.zeros(self.n_stacks)
 
         self.batch_index = 0
 
@@ -127,16 +150,11 @@ class TiledDataGenerator():
     def get_batch(self, index):
         """Generate one batch of data
 
-        Parameters
-        ----------
-        index : int
-            batch index in image/label id list
+        Args:
+            index (int): Batch index in image/label id list.
 
-        Returns
-        -------
-        tuple
-            Contains two numpy arrays,
-            each of shape (batch_size, height, width, 1) = (N, Y, X, Z).
+        Returns:
+            tuple: Contains two numpy arrays, each of shape (batch_size, 1, height, width) = (N, Z, Y, X).
         """
         X = []
         Y0 = []
@@ -240,9 +258,30 @@ class TiledDataGenerator():
         else:
             size = self.size
 
-        # sample random stack TODO: not random, sharpest
+        # Sample random stack
         r_stack = np.random.choice(self.n_stacks)
         meta = self.meta[r_stack]
+
+        # Get stack, spines and dendrites
+        stack_data = self.data["stacks"][f"x{r_stack}"]
+        dendrite_mask_data = self.data["dendrites"][f"x{r_stack}"]
+        spines_mask_data = self.data["spines"][f"x{r_stack}"]
+
+        # Floodfill spines if required and not done before
+        if self.floodfill and not self.floodfilled[r_stack]:
+            spines_mask_data_ff, diff_map = floodfill.floodfill(
+                stack=stack_data,
+                dendrite_mask=dendrite_mask_data,
+                spines_masks=spines_mask_data,
+            )
+            # Only copy if floodfilling made any difference
+            if np.any(diff_map):
+                spines_mask_data = spines_mask_data_ff
+                print(f"Successfully floodfilled spines of stack {r_stack}")
+            else:
+                print(
+                    f"Floodfilling did not add any spines masks to stack {r_stack}")
+            self.floodfilled[r_stack] = 1
 
         target_h = size[1]
         target_w = size[2]
@@ -281,9 +320,9 @@ class TiledDataGenerator():
         z_end = z_begin + size[0]
 
         # Scale if neccessary to the correct dimensions
-        tmp_stack = self.data['stacks'][f'x{r_stack}'][z_begin:z_end, y:y+h, x:x+w]
-        tmp_dendrites = self.data['dendrites'][f'x{r_stack}'][z_begin:z_end, y:y+h, x:x+w]
-        tmp_spines = self.data['spines'][f'x{r_stack}'][z_begin:z_end, y:y+h, x:x+w]
+        tmp_stack = stack_data[z_begin:z_end, y: y + h, x: x + w]
+        tmp_dendrites = dendrite_mask_data[z_begin:z_end, y: y + h, x: x + w]
+        tmp_spines = spines_mask_data[z_begin:z_end, y: y + h, x: x + w]
 
         # Sanity checks
         assert tmp_stack.shape == (
