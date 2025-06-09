@@ -1,5 +1,5 @@
 # Local imports
-from utils import floodfill
+from utils.stack import Stack
 
 # External libraries imports
 import numpy as np
@@ -8,15 +8,8 @@ import cv2
 import albumentations as A
 import random
 import tifffile as tf
-from typing import TypedDict, List
+from typing import List
 from collections import namedtuple
-
-
-class Stack(TypedDict):
-    img: str
-    d_mask: str
-    s_masks: str
-    meta: str
 
 
 class TiledDataGenerator():
@@ -32,8 +25,7 @@ class TiledDataGenerator():
         shuffle=True,
         seed=42,
         normalize=[-1, 1],
-        min_content=None,
-        floodfill=True,
+        min_content=None
     ):
         """Data Generator that creates tiled data samples from an input image for training DeepD3.
         Essentially like DataGeneratorStream, but the output produced is not a stream, but a list of input tiles.
@@ -53,8 +45,6 @@ class TiledDataGenerator():
             min_content (float): Hyper-parameter that stablishes the minimum content in image
                                  (annotated dendrite or spine), not considered if 0. Default
                                  to half the tile size in the XY plane.
-            floodfill (bool, optional): Whether to apply floodfill to the spines masks of the stacks
-                                        before taking the samples.
         """
 
         # Save settings
@@ -77,11 +67,6 @@ class TiledDataGenerator():
             self.load_raw()
         else:
             self.load_d3set()
-
-        # Set up floodfill, if required
-        self.floodfill = floodfill
-        if self.floodfill:
-            self.floodfilled = np.zeros(self.n_stacks)
 
         self.batch_index = 0
 
@@ -266,22 +251,6 @@ class TiledDataGenerator():
         stack_data = self.data["stacks"][f"x{r_stack}"]
         dendrite_mask_data = self.data["dendrites"][f"x{r_stack}"]
         spines_mask_data = self.data["spines"][f"x{r_stack}"]
-
-        # Floodfill spines if required and not done before
-        if self.floodfill and not self.floodfilled[r_stack]:
-            spines_mask_data_ff, diff_map = floodfill.floodfill(
-                stack=stack_data,
-                dendrite_mask=dendrite_mask_data,
-                spines_masks=spines_mask_data,
-            )
-            # Only copy if floodfilling made any difference
-            if np.any(diff_map):
-                spines_mask_data = spines_mask_data_ff
-                print(f"Successfully floodfilled spines of stack {r_stack}")
-            else:
-                print(
-                    f"Floodfilling did not add any spines masks to stack {r_stack}")
-            self.floodfilled[r_stack] = 1
 
         target_h = size[1]
         target_w = size[2]
