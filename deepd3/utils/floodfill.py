@@ -1,7 +1,7 @@
 import numpy as np
 from collections import deque
 from skimage.measure import label
-import tifffile as tf
+import tifffile
 
 
 def get_neighborhood(x, y, z, shape):
@@ -140,9 +140,9 @@ def floodfill_stacks(fn):
         fn (str): A list of paths to the data stacks. They should be raw images, d3set is not supported yet.
     """
     for i in range(len(fn)):
-        img = tf.imread(fn[i]['img'])
-        d_mask = tf.imread(fn[i]['d_mask'])
-        s_masks = tf.imread(fn[i]['s_masks'])
+        img = tifffile.imread(fn[i]['img'])
+        d_mask = tifffile.imread(fn[i]['d_mask'])
+        s_masks = tifffile.imread(fn[i]['s_masks'])
         spines_mask_data_ff, diff_map = floodfill(
             stack=img,
             dendrite_mask=d_mask,
@@ -150,6 +150,6 @@ def floodfill_stacks(fn):
         )
         # Only write back to disk if floodfilling made any difference
         if np.any(diff_map):
-            tf.imwrite(fn[i]['s_masks'], spines_mask_data_ff)
+            tifffile.imwrite(fn[i]['s_masks'], spines_mask_data_ff)
             print(
                 f"Spines masks from stack {i} were floodfilled with {np.sum(diff_map)} voxels")

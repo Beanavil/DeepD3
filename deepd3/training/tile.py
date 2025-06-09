@@ -7,12 +7,12 @@ import flammkuchen as fl
 import cv2
 import albumentations as A
 import random
-import tifffile as tf
+import tifffile
 from typing import List
 from collections import namedtuple
+from tensorflow.keras.utils import Sequence
 
-
-class TiledDataGenerator():
+class TiledDataGenerator(Sequence):
 
     def __init__(
         self,
@@ -58,6 +58,7 @@ class TiledDataGenerator():
         self.samples_per_epoch = samples_per_epoch
         self.size = size
         self.target_resolution = target_resolution
+        self.steps_per_epoch = self.samples_per_epoch // self.batch_size
         # Default to 30% of image pixels as minimum masked
         self.min_content = float(
             size[1] * size[2] * 0.003) if min_content is None else min_content
@@ -69,6 +70,7 @@ class TiledDataGenerator():
             self.load_d3set()
 
         self.batch_index = 0
+        self.epoch_index = 0
 
         self.cur_tile_x = 0
         self.cur_tile_y = 0
@@ -87,52 +89,64 @@ class TiledDataGenerator():
 
     def load_raw(self):
         # Load raw images as np arrays
-        img_file = self.fn[0]['img']
-        img = tf.imread(img_file)
-        d_mask = tf.imread(self.fn[0]['d_mask'])
-        s_masks = tf.imread(self.fn[0]['s_masks'])
-        # Original images are stored as (Z, X, Y)
-        img = np.transpose(img, axes=(0, 2, 1))
-        d_mask = np.transpose(d_mask, axes=(0, 2, 1))
-        s_masks = np.transpose(s_masks, axes=(0, 2, 1))
-        # Load metadata following d3set format
+        self.data = {'stacks': {}, "dendrites": {}, "spines": {}}
         self.meta = []
-        MetaEntry = namedtuple(
-            'MetaEntry', ['Height', 'Width', 'Depth', 'Resolution_XY', 'Resolution_Z'])
-        for shape, resolution in zip(self.fn[0]['meta']['stack_shapes'], self.fn[0]['meta']['pixel_sizes']):
-            z, x, y = shape.sizes
-            res_z, res_x, res_y = resolution.sizes
-            meta_entry = MetaEntry(
-                Height=y,
-                Width=x,
-                Depth=z,
-                # Resolutions are in m, so we convert them to um (micrometer)
-                Resolution_XY=max(res_x * 1e+6, res_y * 1e+6),
-                Resolution_Z=res_z * 1e+6
-            )
-            self.meta.append(meta_entry)
+        for i in range(len(self.fn)):
+            img = tifffile.imread(self.fn[i]['img'])
+            d_mask = tifffile.imread(self.fn[i]['d_mask'])
+            s_masks = tifffile.imread(self.fn[i]['s_masks'])
+            # Original images are stored as (Z, X, Y)
+            img = np.transpose(img, axes=(0, 2, 1))
+            d_mask = np.transpose(d_mask, axes=(0, 2, 1))
+            s_masks = np.transpose(s_masks, axes=(0, 2, 1))
+            # Load metadata following d3set format
+            MetaEntry = namedtuple(
+                'MetaEntry', ['Height', 'Width', 'Depth', 'Resolution_XY', 'Resolution_Z'])
+            for shape, resolution in zip(self.fn[i]['meta']['stack_shapes'], self.fn[i]['meta']['pixel_sizes']):
+                z, x, y = shape.sizes
+                res_z, res_x, res_y = resolution.sizes
+                meta_entry = MetaEntry(
+                    Height=y,
+                    Width=x,
+                    Depth=z,
+                    # Resolutions are in m, so we convert them to um (micrometer)
+                    Resolution_XY=max(res_x * 1e+6, res_y * 1e+6),
+                    Resolution_Z=res_z * 1e+6
+                )
+                self.meta.append(meta_entry)
 
-        # Assemble everything
-        self.data = {'stacks': {f"x{0}": img}, "dendrites": {
-            f"x{0}": d_mask}, "spines": {f"x{0}": s_masks}}
+            # Assemble everything
+            self.data['stacks'][f"x{i}"] = img
+            self.data['dendrites'][f"x{i}"] = d_mask
+            self.data['spines'][f"x{i}"] = s_masks
         self.n_stacks = len(self.meta)
 
-    def len_epoch(self):
-        """Denotes the number of batches per epoch"""
-        return self.samples_per_epoch // self.batch_size
-
-    def __iter__(self):
+    def on_epoch_end(self):
         self.batch_index = 0
-        return self
+        self.cur_tile_x = 0
+        self.cur_tile_y = 0
+        self.epoch_index += 1
+        random.seed(self.seed + self.epoch_index)
+        np.random.seed(self.seed + self.epoch_index)
 
-    def __next__(self):
-        if self.batch_index >= self.len_epoch():
-            raise StopIteration
-        batch = self.get_batch(self.batch_index)
-        self.batch_index += 1
-        return batch
+    def __len__(self):
+        """Denotes the number of batches per epoch"""
+        return self.steps_per_epoch
 
-    def get_batch(self, index):
+    # def __iter__(self):
+    #     self.on_epoch_end()
+    #     return self
+
+    # def __next__(self):
+    #     if self.batch_index >= self.__len__():
+    #         # print(f"raising stop in batch index {self.batch_index} with len {self.__len__()} and batch_size {self.batch_size},  self.samples_per_epoch = { self.samples_per_epoch} and  self.steps_per_epoch = {self.steps_per_epoch}")
+    #         self.on_epoch_end()
+    #         raise StopIteration
+    #     # print(f"updating {self.batch_index} to {self.batch_index+1}")
+    #     self.batch_index += 1
+    #     return self.__getitem__(self.batch_index)
+
+    def __getitem__(self, index):
         """Generate one batch of data
 
         Args:
