@@ -12,6 +12,7 @@ from typing import List
 from collections import namedtuple
 from tensorflow.keras.utils import Sequence
 
+
 class TiledDataGenerator(Sequence):
 
     def __init__(
@@ -102,18 +103,17 @@ class TiledDataGenerator(Sequence):
             # Load metadata following d3set format
             MetaEntry = namedtuple(
                 'MetaEntry', ['Height', 'Width', 'Depth', 'Resolution_XY', 'Resolution_Z'])
-            for shape, resolution in zip(self.fn[i]['meta']['stack_shapes'], self.fn[i]['meta']['pixel_sizes']):
-                z, x, y = shape.sizes
-                res_z, res_x, res_y = resolution.sizes
-                meta_entry = MetaEntry(
-                    Height=y,
-                    Width=x,
-                    Depth=z,
-                    # Resolutions are in m, so we convert them to um (micrometer)
-                    Resolution_XY=max(res_x * 1e+6, res_y * 1e+6),
-                    Resolution_Z=res_z * 1e+6
-                )
-                self.meta.append(meta_entry)
+            z, x, y = self.fn[i]['meta']['stack_shapes']['sizes']
+            res_z, res_x, res_y = self.fn[i]['meta']['pixel_sizes']['sizes']
+            meta_entry = MetaEntry(
+                Height=y,
+                Width=x,
+                Depth=z,
+                # Resolutions are in m, so we convert them to um (micrometer)
+                Resolution_XY=max(res_x * 1e+6, res_y * 1e+6),
+                Resolution_Z=res_z * 1e+6
+            )
+            self.meta.append(meta_entry)
 
             # Assemble everything
             self.data['stacks'][f"x{i}"] = img
@@ -219,12 +219,13 @@ class TiledDataGenerator(Sequence):
         Returns:
             list(np.ndarray, np.ndarray, np.ndarray): stack image with respective labels
         """
-        max_tile_y = self.meta[0].Height - self.size[1] + 1
-        max_tile_x = self.meta[0].Width - self.size[2] + 1
+        r_stack = np.random.choice(self.n_stacks)
+        max_tile_y = self.meta[r_stack].Height - self.size[1] + 1
+        max_tile_x = self.meta[r_stack].Width - self.size[2] + 1
         for y in range(self.cur_tile_y, max_tile_y, self.size[1] // 2):
             start_tile_x = self.cur_tile_x if y == self.cur_tile_y else 0
             for x in range(start_tile_x, max_tile_x, self.size[2] // 2):
-                r = self._get_sample(x, y, squeeze)
+                r = self._get_sample(x, y, r_stack, squeeze)
                 if r is None:
                     continue
                 # In either one or both annotations there should be at least `min_content` pixels
@@ -240,7 +241,7 @@ class TiledDataGenerator(Sequence):
         self.cur_tile_y = 0
         return self.get_sample(squeeze)
 
-    def _get_sample(self, x, y, squeeze=True):
+    def _get_sample(self, x, y, r_stack, squeeze=True):
         """Retrieves a sample
 
         Args:
@@ -258,7 +259,6 @@ class TiledDataGenerator(Sequence):
             size = self.size
 
         # Sample random stack
-        r_stack = np.random.choice(self.n_stacks)
         meta = self.meta[r_stack]
 
         # Get stack, spines and dendrites
