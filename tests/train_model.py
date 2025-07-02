@@ -22,7 +22,6 @@ from tensorflow.keras.callbacks import ModelCheckpoint, CSVLogger, LearningRateS
 
 # Set keras framework
 os.environ["SM_FRAMEWORK"] = "tf.keras"
-
 sm.set_framework("tf.keras")
 
 # Import DeepD3 from source
@@ -181,18 +180,20 @@ if __name__ == "__main__":
         default=f"{current_folder}/images",
         help="Path to the folder containing the raw data. Default to 'images' on the current folder.",
     )
-    parser.add_argument("-v", "--verbose",
-                        action="store_true", help="Verbose output")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
 
     args = parser.parse_args()
 
+    # Add a logger and a log file.
     log_level = logging.INFO
-    if args.verbose:
-        log_level = logging.DEBUG
-
+    log_file = os.path.join(args.path, "preprocessing_log.txt")
+    console = rich.logging.Console(file=open(log_file))
     logging.basicConfig(
         format="%(message)s",
-        handlers=[rich.logging.RichHandler(rich_tracebacks=True, markup=True)],
+        handlers=[
+            logging.FileHandler(log_file, mode="a"),
+            rich.logging.RichHandler(console=None, rich_tracebacks=True, markup=True),
+        ],
         level=log_level,
     )
     log = logging.getLogger("rich")
@@ -210,16 +211,14 @@ if __name__ == "__main__":
     def folder_key(f_name):
         return pathlib.PurePath(f_name).name.split("_")[0]
 
-    folders = {gr: list(items)
-               for gr, items in groupby(subfolders, key=folder_key)}
+    folders = {gr: list(items) for gr, items in groupby(subfolders, key=folder_key)}
     if "processed" not in folders:
         parser.error(
             f"The raw data must be already preprocessed and placed into a 'processed' folder in {data_folder}"
         )
 
     # Validate existence of subfolders with preprocessed data for each animal
-    subfolders = [f.path for f in os.scandir(
-        folders.get("processed")[0]) if f.is_dir()]
+    subfolders = [f.path for f in os.scandir(folders.get("processed")[0]) if f.is_dir()]
     subfolders.sort()
 
     def folder_key(f_name):
@@ -239,8 +238,7 @@ if __name__ == "__main__":
         for subfolder in data_subfolders:
             if args.verbose:
                 log.info(f"    Training model on data from {subfolder}")
-            train_model(in_folder=subfolder,
-                        out_folder=out_folder, animal=animal)
+            train_model(in_folder=subfolder, out_folder=out_folder, animal=animal)
             if args.verbose:
                 log.info(f"    Finished training from {subfolder}")
         if args.verbose:

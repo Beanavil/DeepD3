@@ -47,7 +47,13 @@ def process_raw_data_subfolder(in_folder: str, out_folder: str):
     # separate the dendrite from the spines masks, as well as to separate each slice of spines'
     # masks (that is, to overlay the masks for the dendrite and the differenct XY slices).
     for base in datasets.keys():
+
+
+<< << << < HEAD
         for mat_file in datasets[base]["mat"]:
+== == == =
+        for mat_file in datasets[base]['mat']:
+>>>>>> > 809e3c5(Print logs to file instead of console)
             dendrite_idx = process_mat(
                 mat_file, base, out_folder, args.verbose, log)
             print(
@@ -79,16 +85,16 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    # Add a logger and a log file.
     log_level = logging.INFO
-    # if args.verbose:
-    #     log_level = logging.DEBUG
-
-    logging.basicConfig(
-        format="%(message)s",
-        handlers=[rich.logging.RichHandler(rich_tracebacks=True, markup=True)],
-        level=log_level,
-    )
-    log = logging.getLogger("rich")
+    log_file = f'{args.path}/preprocessing_log.txt'
+    if not os.path.exists(log_file):
+        os.mknod(log_file)
+    console = rich.logging.Console(
+        file=open(log_file))
+    logging.basicConfig(format='%(message)s', handlers=[rich.logging.RichHandler(
+        console=console, rich_tracebacks=True, markup=True)], level=log_level)
+    log = logging.getLogger('rich')
 
     # Validate input folder contents.
     data_folder = args.path

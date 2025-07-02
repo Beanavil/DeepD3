@@ -6,6 +6,7 @@ import h5py
 import tensorflow
 import numpy as np
 import tifffile as tf
+from scipy import ndimage
 from msr_reader import OBFFile
 
 common_stack_name_re = r"(\d{4}-\d{2}-\d{2}-m\d+)"
@@ -21,7 +22,7 @@ def laplacian_var(img):
     """Compute variance of laplacian of an image. That is, sharpness level.
     Higher variance in laplacian means higher variance in intensity changes.
     """
-    laplacian = cv2.Laplacian(img, cv2.CV_32F)
+    laplacian = ndimage.laplace(img)
     # cv2.meanStdDev avoids allocating an extra full‑sized array, unlike cv2.Laplacian().
     _, std = cv2.meanStdDev(laplacian)
     return float(std.item() ** 2)
