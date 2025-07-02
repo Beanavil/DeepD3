@@ -47,13 +47,17 @@ def process_raw_data_subfolder(in_folder: str, out_folder: str):
     # separate the dendrite from the spines masks, as well as to separate each slice of spines'
     # masks (that is, to overlay the masks for the dendrite and the differenct XY slices).
     for base in datasets.keys():
-        mat_file_list = datasets[base]['mat']
+        mat_file_list = datasets[base]["mat"]
         if mat_file_list:
-            dendrite_idx = process_mat(mat_file_list, base, out_folder, args.verbose, log)
-            print(f'{base} dataset used {len(mat_file_list)} mat files. stack from {base} dataset using dendrite mask from mask {dendrite_idx}')
+            dendrite_idx = process_mat(
+                mat_file_list, base, out_folder, args.verbose, log
+            )
+            log.info(
+                f"{base} dataset used {len(mat_file_list)} mat files. stack from {base} dataset using dendrite mask from mask {dendrite_idx}"
+            )
 
     if args.verbose:
-        log.info(f'        Processed mat files')
+        log.info(f"        Processed mat files")
 
     # Process skelonization files (.nml).
     # TODO
@@ -73,21 +77,24 @@ if __name__ == "__main__":
         default=f"{current_folder}/images",
         help="Path to the folder containing the raw data. Default to 'images' on the current folder.",
     )
-    parser.add_argument("-v", "--verbose",
-                        action="store_true", help="Verbose output")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
 
     args = parser.parse_args()
 
     # Add a logger and a log file.
     log_level = logging.INFO
-    log_file = f'{args.path}/preprocessing_log.txt'
+    log_file = f"{args.path}/preprocessing_log.txt"
     if not os.path.exists(log_file):
         os.mknod(log_file)
-    console = rich.logging.Console(
-        file=open(log_file))
-    logging.basicConfig(format='%(message)s', handlers=[rich.logging.RichHandler(
-        console=console, rich_tracebacks=True, markup=True)], level=log_level)
-    log = logging.getLogger('rich')
+    console = rich.logging.Console(file=open(log_file))
+    logging.basicConfig(
+        format="%(message)s",
+        handlers=[
+            rich.logging.RichHandler(console=console, rich_tracebacks=True, markup=True)
+        ],
+        level=log_level,
+    )
+    log = logging.getLogger("rich")
 
     # Validate input folder contents.
     data_folder = args.path
@@ -121,8 +128,7 @@ if __name__ == "__main__":
         for subfolder in data_subfolders:
             if args.verbose:
                 log.info(f"    Processing data from {subfolder}")
-            process_raw_data_subfolder(
-                in_folder=subfolder, out_folder=out_folder)
+            process_raw_data_subfolder(in_folder=subfolder, out_folder=out_folder)
             if args.verbose:
                 log.info(f"    Finished processing data from {subfolder}")
         if args.verbose:
@@ -132,5 +138,3 @@ if __name__ == "__main__":
 
     if args.verbose:
         log.info(f"Finished processing all data")
-
-
