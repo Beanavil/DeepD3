@@ -1,0 +1,7 @@
+tensorflow>=2.0
+opencv-python
+h5py
+numpy
+tifffile
+rich
+msr-reader
