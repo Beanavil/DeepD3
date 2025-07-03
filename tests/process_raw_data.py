@@ -13,7 +13,7 @@ from collections import defaultdict
 
 
 def process_raw_data_subfolder(in_folder: str, out_folder: str):
-    """ Core of the raw data processing pipeline.
+    """Core of the raw data processing pipeline.
 
     Processes all the raw data from one subfolder for one animal/species and writes the
     processed data to the specified output folder.
@@ -33,14 +33,14 @@ def process_raw_data_subfolder(in_folder: str, out_folder: str):
     for f in nml_files:
         add_file_as_tuple(f, "nml", datasets)
     if args.verbose:
-        log.info(f'        Found {len(datasets)} datasets')
+        log.info(f"        Found {len(datasets)} datasets")
 
     # Process original microscope image (.obf).
     for base in datasets.keys():
-        for obf_file in datasets[base]['obf']:
+        for obf_file in datasets[base]["obf"]:
             process_obf(obf_file, base, out_folder)
     if args.verbose:
-        log.info(f'        Processed obf files')
+        log.info(f"        Processed obf files")
 
     # Process masks (.mat).
     # We get the dendrite and spine masks in the same file. What we need to accomplish is to
@@ -58,27 +58,35 @@ def process_raw_data_subfolder(in_folder: str, out_folder: str):
     # Process skelonization files (.nml).
     # TODO
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        prog='process_raw_data',
-        description='Process BIMAP P4 turtle and mice raw data, and produce usable stacks',
+        prog="process_raw_data",
+        description="Process BIMAP P4 turtle and mice raw data, and produce usable stacks",
     )
 
     current_folder = os.path.dirname(os.path.realpath(__file__))
 
-    parser.add_argument('-p', '--path', default=f'{current_folder}/images',
-                        help='Path to the folder containing the raw data. Default to \'images\' on the current folder.')
-    parser.add_argument('-v', '--verbose',
-                        action='store_true', help='Verbose output')
+    parser.add_argument(
+        "-p",
+        "--path",
+        default=f"{current_folder}/images",
+        help="Path to the folder containing the raw data. Default to 'images' on the current folder.",
+    )
+    parser.add_argument("-v", "--verbose",
+                        action="store_true", help="Verbose output")
 
     args = parser.parse_args()
 
+    # Add a logger and a log file.
     log_level = logging.INFO
-    # if args.verbose:
-    #     log_level = logging.DEBUG
-
+    log_file = f'{args.path}/preprocessing_log.txt'
+    if not os.path.exists(log_file):
+        os.mknod(log_file)
+    console = rich.logging.Console(
+        file=open(log_file))
     logging.basicConfig(format='%(message)s', handlers=[rich.logging.RichHandler(
-        rich_tracebacks=True, markup=True)], level=log_level)
+        console=console, rich_tracebacks=True, markup=True)], level=log_level)
     log = logging.getLogger('rich')
 
     # Validate input folder contents.
@@ -86,36 +94,43 @@ if __name__ == '__main__':
 
     # Validate existence of folder.
     if not os.path.exists(data_folder):
-        parser.error(f'Folder {data_folder} does not exist')
+        parser.error(f"Folder {data_folder} does not exist")
     subfolders = [f.path for f in os.scandir(data_folder) if f.is_dir()]
     subfolders.sort()
 
     # Validate existence of subfolders for each animal.
-    def folder_key(f_name): return pathlib.PurePath(f_name).name.split('_')[0]
-    animals_data = {gr: list(items)
-                    for gr, items in groupby(subfolders, key=folder_key)}
+    def folder_key(f_name):
+        return pathlib.PurePath(f_name).name.split("_")[0]
+
+    animals_data = {
+        gr: list(items) for gr, items in groupby(subfolders, key=folder_key)
+    }
     if len(animals_data) == 0:
         parser.error(
-            'There must be at least one data folder for one of the animals (turtel, mice)')
+            "There must be at least one data folder for one of the animals (turtel, mice)"
+        )
 
-    animals_data.pop('processed', None)
+    animals_data.pop("processed", None)
 
     # Process data from the found folders.
     for animal, data_subfolders in animals_data.items():
         if args.verbose:
-            log.info(f'Processing data for {animal}')
-        out_folder = f'{data_folder}/processed/{animal}'
+            log.info(f"Processing data for {animal}")
+        out_folder = f"{data_folder}/processed/{animal}"
         os.makedirs(out_folder, exist_ok=True)
         for subfolder in data_subfolders:
             if args.verbose:
-                log.info(f'    Processing data from {subfolder}')
+                log.info(f"    Processing data from {subfolder}")
             process_raw_data_subfolder(
                 in_folder=subfolder, out_folder=out_folder)
             if args.verbose:
-                log.info(f'    Finished processing data from {subfolder}')
+                log.info(f"    Finished processing data from {subfolder}")
         if args.verbose:
             log.info(
-                f'Finished processing data for {animal}. Data written to {out_folder}')
+                f"Finished processing data for {animal}. Data written to {out_folder}"
+            )
 
     if args.verbose:
-        log.info(f'Finished processing all data')
+        log.info(f"Finished processing all data")
+
+

@@ -8,7 +8,9 @@ import tensorflow
 import scipy
 import numpy as np
 import tifffile as tf
+from scipy import ndimage
 from msr_reader import OBFFile
+
 common_stack_name_re = r"(\d{4}-\d{2}-\d{2}-m\d+)"
 
 
@@ -25,10 +27,10 @@ def laplacian_var(img):
     """Compute variance of laplacian of an image. That is, sharpness level.
     Higher variance in laplacian means higher variance in intensity changes.
     """
-    laplacian = cv2.Laplacian(img, cv2.CV_32F)
+    laplacian = ndimage.laplace(img)
     # cv2.meanStdDev avoids allocating an extra full‑sized array, unlike cv2.Laplacian().
     _, std = cv2.meanStdDev(laplacian)
-    return float(std.item()**2)
+    return float(std.item() ** 2)
 
 
 def sharpness(img):
@@ -47,9 +49,7 @@ def sharpness(img):
 
 
 def stacksize_2_dic(s):
-    return {
-        'sizes': s.sizes
-    }
+    return {"sizes": s.sizes}
 
 
 def process_obf(obf_path, base, out_folder):
@@ -82,7 +82,7 @@ def process_obf(obf_path, base, out_folder):
             # Stack shapes (Z, Y, X).
             "stack_shapes": stacksize_2_dic(f.shapes[max_sharpness_idx]),
             # Resolutions (in meters).
-            "pixel_sizes": stacksize_2_dic(f.pixel_sizes[max_sharpness_idx])
+            "pixel_sizes": stacksize_2_dic(f.pixel_sizes[max_sharpness_idx]),
         }
         out_json_path = os.path.join(out_folder, f"{base}_meta.json")
         with open(out_json_path, "w") as jf:
@@ -95,7 +95,7 @@ def process_obf(obf_path, base, out_folder):
 
 
 def split_masks(stack):
-    """ Splits masks into dendrites and spines.
+    """Splits masks into dendrites and spines.
 
     Dendrite mask doesn't necessarily have the same position always. It is detected by assuming
     that it has the highest amount of masked pixels from all the masks.
@@ -187,14 +187,12 @@ def process_mat(mat_paths, base, out_folder, verbose, log):
     tf.imwrite(os.path.join(out_folder, f"{base}_spines.tif"), spines)
     tf.imwrite(os.path.join(out_folder, f"{base}_dendrite.tif"), dendrite)
 
-    if verbose:
-        log.info(f"        Saved masks for {base}")
-
     return dendrite_idx
+
 
 def extract_base(filename):
     """Extract matching base part from filename.
-       First match of the regex, default to the part of the filename before first "_".
+    First match of the regex, default to the part of the filename before first "_".
     """
     base = os.path.basename(filename)
     m = re.match(common_stack_name_re, base)
@@ -202,15 +200,13 @@ def extract_base(filename):
 
 
 def add_file(path: str, key: str, datasets):
-    """Group files by base filename.
-    """
+    """Group files by base filename."""
     base = extract_base(path)
     datasets[base][key] = path
 
 
 def add_file_as_tuple(path: str, key: str, datasets):
-    """Group files by base filename.
-    """
+    """Group files by base filename."""
     base = extract_base(path)
     datasets[base][key] += (path,)
 
