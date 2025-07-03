@@ -47,16 +47,16 @@ def process_raw_data_subfolder(in_folder: str, out_folder: str):
     # separate the dendrite from the spines masks, as well as to separate each slice of spines'
     # masks (that is, to overlay the masks for the dendrite and the differenct XY slices).
     for base in datasets.keys():
-        for mat_file in datasets[base]['mat']:
-            dendrite_idx = process_mat(mat_file, base, out_folder, args.verbose, log)
-            print(
-                f'{mat_file} stack from {base} dataset using dendrite mask from mask {dendrite_idx}')
+        mat_file_list = datasets[base]['mat']
+        if mat_file_list:
+            dendrite_idx = process_mat(mat_file_list, base, out_folder, args.verbose, log)
+            print(f'{base} dataset used {len(mat_file_list)} mat files. stack from {base} dataset using dendrite mask from mask {dendrite_idx}')
+
     if args.verbose:
         log.info(f'        Processed mat files')
 
     # Process skelonization files (.nml).
     # TODO
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(

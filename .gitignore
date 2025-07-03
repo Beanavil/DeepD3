@@ -143,4 +143,7 @@ examples/Training DeepD3 model UNet.ipynb
 wandb
 
 # Test images
-tests/images/
+test_images/
+
+# extra
+rough.ipynb

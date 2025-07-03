@@ -1,9 +1,11 @@
 import os
+import sys
 import re
 import cv2
 import json
 import h5py
 import tensorflow
+import scipy
 import numpy as np
 import tifffile as tf
 from msr_reader import OBFFile
@@ -11,10 +13,12 @@ common_stack_name_re = r"(\d{4}-\d{2}-\d{2}-m\d+)"
 
 
 def fadvise(fileno):
-    """ Hint OS to discard file contents.
-    """
-    os.posix_fadvise(fileno, 0, os.fstat(
-        fileno).st_size, os.POSIX_FADV_DONTNEED)
+    """ Hint OS to discard file contents."""
+    if sys.platform != "win32":
+        os.posix_fadvise(fileno, 0, os.fstat(fileno).st_size, os.POSIX_FADV_DONTNEED)
+    else:
+        # On Windows or if posix_fadvise is not available, do nothing
+        pass
 
 
 def laplacian_var(img):
@@ -107,7 +111,6 @@ def split_masks(stack):
     dendrite = (stack == dendrite_idx).astype(np.uint8) * 255
     return spines, dendrite, dendrite_idx
 
-
 def label_masks(hdf5_mask):
     """Converts a list of binary 3D masks into a single labeled mask stack.
 
@@ -137,25 +140,57 @@ def label_masks(hdf5_mask):
             # gc.collect()
     return stack
 
+def process_mat(mat_paths, base, out_folder, verbose, log):
+    """Process and merge labeled masks from multiple .mat files for a given dataset."""
+    
+    merged_stack = None  # Will hold combined labeled mask stack
+    label_offset = 0     # Track label offsets to avoid overlaps
 
-def process_mat(mat_path, base, out_folder, verbose, log):
-    file = h5py.File(mat_path, 'r')
-    if 'mask' not in file.keys():
-        if verbose:
-            log.info(f'        Skipping {mat_path}: no \'mask\' key.')
-        return
-    h5df_data = file['mask']
+    for mat_path in mat_paths:
+        file = h5py.File(mat_path, 'r')
+        if 'mask' not in file:
+            if verbose:
+                log.info(f"        Skipping {mat_path}: no 'mask' key.")
+            continue
 
-    # Label and overlay masks, and split into dendrite and spines.
-    label_stack = label_masks(h5df_data)
-    spines, dendrite, dendrite_idx = split_masks(label_stack)
+        h5df_data = file['mask']
+        curr_label_stack = label_masks(h5df_data)  # Your function that returns labeled 3D mask
+
+        if merged_stack is None:
+            merged_stack = np.zeros_like(curr_label_stack, dtype=np.uint16)
+
+        # Shift labels in current stack to avoid overlap
+        curr_label_stack = curr_label_stack.astype(np.uint16)
+        curr_label_stack[curr_label_stack > 0] += label_offset
+
+        # Merge nonzero voxels into merged_stack
+        nonzero_mask = curr_label_stack > 0
+        merged_stack[nonzero_mask] = curr_label_stack[nonzero_mask]
+
+        # Update label_offset for next round
+        label_offset = merged_stack.max()
+
+    if merged_stack is None:
+        log.warning(f"        No valid masks found for base {base}. Skipping.")
+        return None
+
+    # Optional: save merged labeled mask as .mat
+    mat_save_path = os.path.join(out_folder, f"{base}_merged_labels.mat")
+    scipy.io.savemat(mat_save_path, {"merged_labels": merged_stack})
+    if verbose:
+        log.info(f"        Saved merged labeled mask as .mat: {mat_save_path}")
+
+    # Now split into spines and dendrite
+    spines, dendrite, dendrite_idx = split_masks(merged_stack)
 
     # Save spines and dendrite masks as TIF.
     tf.imwrite(os.path.join(out_folder, f"{base}_spines.tif"), spines)
     tf.imwrite(os.path.join(out_folder, f"{base}_dendrite.tif"), dendrite)
 
-    return dendrite_idx
+    if verbose:
+        log.info(f"        Saved masks for {base}")
 
+    return dendrite_idx
 
 def extract_base(filename):
     """Extract matching base part from filename.
