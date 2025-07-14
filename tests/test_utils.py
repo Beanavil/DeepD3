@@ -21,7 +21,7 @@ def fadvise(fileno):
     else:
         # On Windows or if posix_fadvise is not available, do nothing
         pass
-
+ 
 
 def laplacian_var(img):
     """Compute variance of laplacian of an image. That is, sharpness level.
@@ -50,7 +50,6 @@ def sharpness(img):
 
 def stacksize_2_dic(s):
     return {"sizes": s.sizes}
-
 
 def process_obf(obf_path, base, out_folder):
     """Processes an obf file, which corresponds to a group of 3D microscope images,
@@ -94,22 +93,38 @@ def process_obf(obf_path, base, out_folder):
     del f
 
 
-def split_masks(stack):
-    """Splits masks into dendrites and spines.
-
-    Dendrite mask doesn't necessarily have the same position always. It is detected by assuming
-    that it has the highest amount of masked pixels from all the masks.
+def split_labels_by_size(label_stack, z_thresh=1.5):
     """
-    max_pixel_count = 0
-    dendrite_idx = 0
-    for idx in range(1, stack.max() + 1):
-        pixel_count = np.sum(stack == idx)
-        if pixel_count > max_pixel_count:
-            max_pixel_count = pixel_count
-            dendrite_idx = idx
-    spines = ((stack > 0) & (stack != dendrite_idx)).astype(np.uint8) * 255
-    dendrite = (stack == dendrite_idx).astype(np.uint8) * 255
-    return spines, dendrite, dendrite_idx
+    Splits merged labels into dendrite (large) and spine (small) using z-score size thresholding.
+
+    Parameters:
+        label_stack (ndarray): 3D labeled mask (0 = background)
+        z_thresh (float): Z-score threshold to classify large structures (default = 1.5)
+
+    Returns:
+        spine_labels (list): Label IDs classified as spines
+        dendrite_labels (list): Label IDs classified as dendrites
+        threshold (float): Size threshold used for splitting
+    """
+    labels = np.unique(label_stack)
+    labels = labels[labels != 0]  # remove background label
+
+    label_sizes = {
+        label: np.sum(label_stack == label)
+        for label in labels
+    }
+
+    sizes = np.array(list(label_sizes.values()))
+
+    mean = sizes.mean()
+    std = sizes.std()
+    threshold = mean + z_thresh * std
+
+    dendrite_labels = [label for label, size in label_sizes.items() if size >= threshold]
+    spine_labels = [label for label in labels if label not in dendrite_labels]
+
+    return sorted(spine_labels), sorted(dendrite_labels), threshold
+
 
 def label_masks(hdf5_mask):
     """Converts a list of binary 3D masks into a single labeled mask stack.
@@ -140,7 +155,8 @@ def label_masks(hdf5_mask):
             # gc.collect()
     return stack
 
-def process_mat(mat_paths, base, out_folder, verbose, log):
+
+def process_mat(mat_paths, base, out_folder, verbose, log, z_thresh=1.5):
     """Process and merge labeled masks from multiple .mat files for a given dataset."""
     
     merged_stack = None  # Will hold combined labeled mask stack
@@ -181,13 +197,23 @@ def process_mat(mat_paths, base, out_folder, verbose, log):
         log.info(f"        Saved merged labeled mask as .mat: {mat_save_path}")
 
     # Now split into spines and dendrite
-    spines, dendrite, dendrite_idx = split_masks(merged_stack)
+    spine_labels, dendrite_labels, threshold = split_labels_by_size(merged_stack, z_thresh=z_thresh)
+
+    # Create binary masks from labels
+    spines = np.isin(merged_stack, spine_labels).astype(np.uint8) * 255
+    dendrite = np.isin(merged_stack, dendrite_labels).astype(np.uint8) * 255
+
+    label_dict = {
+        "dendrite": dendrite_labels,
+        "spine": spine_labels,
+        "threshold": threshold
+    }
 
     # Save spines and dendrite masks as TIF.
     tf.imwrite(os.path.join(out_folder, f"{base}_spines.tif"), spines)
     tf.imwrite(os.path.join(out_folder, f"{base}_dendrite.tif"), dendrite)
 
-    return dendrite_idx
+    return label_dict
 
 
 def extract_base(filename):
