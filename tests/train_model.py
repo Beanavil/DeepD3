@@ -2,33 +2,25 @@
 from deepd3.model import DeepD3_Model
 from deepd3.utils.floodfill import floodfill_stacks
 from deepd3.training.tile import TiledDataGenerator, Stack
+
+# Set keras framework
+import os
+
+os.environ["SM_FRAMEWORK"] = "tf.keras"
 import segmentation_models as sm
 from test_utils import add_file, schedule
 
 # Others
-import os
-import sys
 import glob
 import json
 import logging
 import pathlib
 import argparse
 import rich.logging
-from pathlib import Path
 from itertools import groupby
 from collections import defaultdict
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import ModelCheckpoint, CSVLogger, LearningRateScheduler
-
-# Set keras framework
-os.environ["SM_FRAMEWORK"] = "tf.keras"
-sm.set_framework("tf.keras")
-
-# Import DeepD3 from source
-current_path = os.path.dirname(os.path.realpath(__file__))
-deepd3_root_path = Path(current_path).resolve().parent
-sys.path.insert(0, f"{deepd3_root_path}")
-sys.path.insert(0, f"{deepd3_root_path}/deepd3")
 
 # Fixed training parameters
 res = 0.02  # Fixed to 20 nm, can be None for mixed resolution training
@@ -74,8 +66,7 @@ def train_model(in_folder: str, out_folder: str, animal: str):
                 )
             )
         except Exception as e:
-            if args.verbose:
-                log.warning(f"Skipping {base} due to error: {e}")
+            log.warning(f"Skipping {base} due to error: {e}")
             continue
 
     if len(stack_list) == 0:
@@ -175,6 +166,18 @@ if __name__ == "__main__":
         help="Learning rate to be used for training. Default to 0.0005.",
     )
     parser.add_argument(
+        "-m",
+        "--out-models-folder",
+        default="models",
+        help="Path to the folder to contain the trained models, relative to args.path. Default to 'models' (that is, args.path/models).",
+    )
+    parser.add_argument(
+        "-o",
+        "--preproc-out-folder",
+        default="processed",
+        help="Path to the folder containing the preprocessed data, relative to args.path. Default to 'processed' (that is, args.path/processed).",
+    )
+    parser.add_argument(
         "-p",
         "--path",
         default=f"{current_folder}/images",
@@ -186,8 +189,7 @@ if __name__ == "__main__":
 
     # Add a logger and a log file.
     log_level = logging.INFO
-    log_file = os.path.join(args.path, "preprocessing_log.txt")
-    console = rich.logging.Console(file=open(log_file))
+    log_file = os.path.join(args.path, "training_log.txt")
     logging.basicConfig(
         format="%(message)s",
         handlers=[
@@ -198,27 +200,20 @@ if __name__ == "__main__":
     )
     log = logging.getLogger("rich")
 
-    # Validate input folder contents
+    # Validate input folder(s) contents
     data_folder = args.path
+    preproc_folder = f"{data_folder}/{args.preproc_out_folder}"
 
     # Validate existence of folder
     if not os.path.exists(data_folder):
         parser.error(f"Folder {data_folder} does not exist")
-    subfolders = [f.path for f in os.scandir(data_folder) if f.is_dir()]
-    subfolders.sort()
-
-    # Validate existence of subfolder with preprocessed data
-    def folder_key(f_name):
-        return pathlib.PurePath(f_name).name.split("_")[0]
-
-    folders = {gr: list(items) for gr, items in groupby(subfolders, key=folder_key)}
-    if "processed" not in folders:
+    if not os.path.exists(preproc_folder):
         parser.error(
-            f"The raw data must be already preprocessed and placed into a 'processed' folder in {data_folder}"
+            f"Folder {preproc_folder} does not exist. The raw data must be already preprocessed and placed into {preproc_folder}"
         )
 
     # Validate existence of subfolders with preprocessed data for each animal
-    subfolders = [f.path for f in os.scandir(folders.get("processed")[0]) if f.is_dir()]
+    subfolders = [f.path for f in os.scandir(preproc_folder) if f.is_dir()]
     subfolders.sort()
 
     def folder_key(f_name):
@@ -228,13 +223,13 @@ if __name__ == "__main__":
         gr: list(items) for gr, items in groupby(subfolders, key=folder_key)
     }
 
-    animals_data.pop("models", None)
+    animals_data.pop(args.out_models_folder, None)
 
     for animal, data_subfolders in animals_data.items():
         if args.verbose:
             log.info(f"Training model for {animal}")
-        out_folder = f"{data_folder}/models/{animal}"
-        os.makedirs(out_folder, exist_ok=True)
+        out_folder = f"{data_folder}/{args.out_models_folder}/{animal}"
+        if not args.floodfill: os.makedirs(out_folder, exist_ok=True)
         for subfolder in data_subfolders:
             if args.verbose:
                 log.info(f"    Training model on data from {subfolder}")
