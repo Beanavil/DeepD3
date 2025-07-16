@@ -52,6 +52,16 @@ def stacksize_2_dic(s):
     return {"sizes": s.sizes}
 
 
+def to_uint8_minmax(img):
+    """Converts an image in float32 to uint8 by minmax scaling."""
+    img_min = np.min(img)
+    img_max = np.max(img)
+    if img_max == img_min:
+        return np.zeros_like(img, dtype=np.uint8)
+    img_norm = (img - img_min) / (img_max - img_min)
+    return (img_norm * 255).astype(np.uint8)
+
+
 def process_obf(obf_path, base, out_folder, log):
     """Processes an obf file, which corresponds to a group of 3D microscope images,
 
@@ -76,7 +86,7 @@ def process_obf(obf_path, base, out_folder, log):
                     max_sharpness_idx = idx
                     sharpest_stack = img
             out_tif_path = os.path.join(out_folder, f"{base}_stack.tif")
-            tf.imwrite(out_tif_path, sharpest_stack)
+            tf.imwrite(out_tif_path, to_uint8_minmax(sharpest_stack))
 
             # Save metadata as JSON.
             meta = {
