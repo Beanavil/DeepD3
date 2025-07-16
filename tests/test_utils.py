@@ -15,13 +15,13 @@ common_stack_name_re = r"(\d{4}-\d{2}-\d{2}-m\d+)"
 
 
 def fadvise(fileno):
-    """ Hint OS to discard file contents."""
+    """Hint OS to discard file contents."""
     if sys.platform != "win32":
         os.posix_fadvise(fileno, 0, os.fstat(fileno).st_size, os.POSIX_FADV_DONTNEED)
     else:
         # On Windows or if posix_fadvise is not available, do nothing
         pass
- 
+
 
 def laplacian_var(img):
     """Compute variance of laplacian of an image. That is, sharpness level.
@@ -51,7 +51,8 @@ def sharpness(img):
 def stacksize_2_dic(s):
     return {"sizes": s.sizes}
 
-def process_obf(obf_path, base, out_folder):
+
+def process_obf(obf_path, base, out_folder, log):
     """Processes an obf file, which corresponds to a group of 3D microscope images,
 
     It selects the overall sharpest stack and writes it to the 'out_folder'
@@ -62,35 +63,39 @@ def process_obf(obf_path, base, out_folder):
     data generation phase.
     """
     # Save sharpest stack as TIF.
-    with OBFFile(obf_path) as f:
-        max_sharpness = 0
-        max_sharpness_idx = 0
-        sharpest_stack = None
-        for idx in range(f.num_stacks):
-            img = f.read_stack(idx)
-            img_sharpness = sharpness(img)
-            if img_sharpness > max_sharpness:
-                max_sharpness = img_sharpness
-                max_sharpness_idx = idx
-                sharpest_stack = img
-        out_tif_path = os.path.join(out_folder, f"{base}_stack.tif")
-        tf.imwrite(out_tif_path, sharpest_stack)
+    try:
+        with OBFFile(obf_path) as f:
+            max_sharpness = 0
+            max_sharpness_idx = 0
+            sharpest_stack = None
+            for idx in range(f.num_stacks):
+                img = f.read_stack(idx)
+                img_sharpness = sharpness(img)
+                if img_sharpness > max_sharpness:
+                    max_sharpness = img_sharpness
+                    max_sharpness_idx = idx
+                    sharpest_stack = img
+            out_tif_path = os.path.join(out_folder, f"{base}_stack.tif")
+            tf.imwrite(out_tif_path, sharpest_stack)
 
-        # Save metadata as JSON.
-        meta = {
-            # Stack shapes (Z, Y, X).
-            "stack_shapes": stacksize_2_dic(f.shapes[max_sharpness_idx]),
-            # Resolutions (in meters).
-            "pixel_sizes": stacksize_2_dic(f.pixel_sizes[max_sharpness_idx]),
-        }
-        out_json_path = os.path.join(out_folder, f"{base}_meta.json")
-        with open(out_json_path, "w") as jf:
-            json.dump(meta, jf, indent=2)
+            # Save metadata as JSON.
+            meta = {
+                # Stack shapes (Z, Y, X).
+                "stack_shapes": stacksize_2_dic(f.shapes[max_sharpness_idx]),
+                # Resolutions (in meters).
+                "pixel_sizes": stacksize_2_dic(f.pixel_sizes[max_sharpness_idx]),
+            }
+            out_json_path = os.path.join(out_folder, f"{base}_meta.json")
+            with open(out_json_path, "w") as jf:
+                json.dump(meta, jf, indent=2)
 
-        # Prevent OS from caching contents.
-        fileno = f.fd.fileno()
-        fadvise(fileno)
-    del f
+            # Prevent OS from caching contents.
+            fileno = f.fd.fileno()
+            fadvise(fileno)
+        del f
+    except Exception as e:
+        log.warning(f"Skipping {obf_path} due to error: {e}")
+        return
 
 
 def split_labels_by_size(label_stack, z_thresh=1.5):
@@ -109,10 +114,7 @@ def split_labels_by_size(label_stack, z_thresh=1.5):
     labels = np.unique(label_stack)
     labels = labels[labels != 0]  # remove background label
 
-    label_sizes = {
-        label: np.sum(label_stack == label)
-        for label in labels
-    }
+    label_sizes = {label: np.sum(label_stack == label) for label in labels}
 
     sizes = np.array(list(label_sizes.values()))
 
@@ -120,7 +122,9 @@ def split_labels_by_size(label_stack, z_thresh=1.5):
     std = sizes.std()
     threshold = mean + z_thresh * std
 
-    dendrite_labels = [label for label, size in label_sizes.items() if size >= threshold]
+    dendrite_labels = [
+        label for label, size in label_sizes.items() if size >= threshold
+    ]
     spine_labels = [label for label in labels if label not in dendrite_labels]
 
     return sorted(spine_labels), sorted(dendrite_labels), threshold
@@ -158,19 +162,21 @@ def label_masks(hdf5_mask):
 
 def process_mat(mat_paths, base, out_folder, verbose, log, z_thresh=1.5):
     """Process and merge labeled masks from multiple .mat files for a given dataset."""
-    
+
     merged_stack = None  # Will hold combined labeled mask stack
-    label_offset = 0     # Track label offsets to avoid overlaps
+    label_offset = 0  # Track label offsets to avoid overlaps
 
     for mat_path in mat_paths:
-        file = h5py.File(mat_path, 'r')
-        if 'mask' not in file:
+        file = h5py.File(mat_path, "r")
+        if "mask" not in file:
             if verbose:
                 log.info(f"        Skipping {mat_path}: no 'mask' key.")
             continue
 
-        h5df_data = file['mask']
-        curr_label_stack = label_masks(h5df_data)  # Your function that returns labeled 3D mask
+        h5df_data = file["mask"]
+        curr_label_stack = label_masks(
+            h5df_data
+        )  # Your function that returns labeled 3D mask
 
         if merged_stack is None:
             merged_stack = np.zeros_like(curr_label_stack, dtype=np.uint16)
@@ -197,7 +203,9 @@ def process_mat(mat_paths, base, out_folder, verbose, log, z_thresh=1.5):
         log.info(f"        Saved merged labeled mask as .mat: {mat_save_path}")
 
     # Now split into spines and dendrite
-    spine_labels, dendrite_labels, threshold = split_labels_by_size(merged_stack, z_thresh=z_thresh)
+    spine_labels, dendrite_labels, threshold = split_labels_by_size(
+        merged_stack, z_thresh=z_thresh
+    )
 
     # Create binary masks from labels
     spines = np.isin(merged_stack, spine_labels).astype(np.uint8) * 255
@@ -206,7 +214,7 @@ def process_mat(mat_paths, base, out_folder, verbose, log, z_thresh=1.5):
     label_dict = {
         "dendrite": dendrite_labels,
         "spine": spine_labels,
-        "threshold": threshold
+        "threshold": threshold,
     }
 
     # Save spines and dendrite masks as TIF.
