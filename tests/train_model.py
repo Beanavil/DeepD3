@@ -20,6 +20,7 @@ import rich.logging
 from itertools import groupby
 from collections import defaultdict
 from tensorflow.keras.optimizers import Adam
+from sklearn.model_selection import train_test_split
 from tensorflow.keras.callbacks import ModelCheckpoint, CSVLogger, LearningRateScheduler
 
 # Fixed training parameters
@@ -80,18 +81,26 @@ def train_model(in_folder: str, out_folder: str, animal: str):
         log.info("Floodfilling spines masks")
     floodfill_stacks(fn=stack_list)
 
+    # Separate training and test (validation) data.
+    # By default, train_test_split will use a random 25% of the available data for validation and
+    # the complementary, 75%, for training. We pass and int as random state for reproducible trainings.
+    train_stack_list, validate_stack_list =  train_test_split(stack_list, random_state=42)
+
     # Create the tiled samples from raw images and (for spines, floodfilled) masks.
     if args.verbose:
-        log.info("Creating tiled stacks from training data")
+        log.info("Creating tiled stacks from training and validation data")
     dg_training = TiledDataGenerator(
-        fn=stack_list,
+        fn=train_stack_list,
         batch_size=args.batch_size,
         target_resolution=res,
         size=sample_shape,
     )
-
-    # Temporarily reuse training data as validation.
-    dg_validation = dg_training
+    dg_validation = TiledDataGenerator(
+        fn=validate_stack_list,
+        batch_size=args.batch_size,
+        target_resolution=res,
+        size=sample_shape,
+    )
 
     # Compile model.
     # Create a naive DeepD3 model with a given base filter count.
