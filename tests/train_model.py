@@ -76,10 +76,18 @@ def train_model(in_folder: str, out_folder: str, animal: str):
     elif args.verbose:
         log.info(f"Using {len(stack_list)} stacks for training")
 
-    # Floodfill all the spines' masks and write back to disk.
-    if args.verbose:
-        log.info("Floodfilling spines masks")
-    floodfill_stacks(fn=stack_list)
+    if args.floodfill:
+        # Floodfill all the spines' masks and write back to disk.
+        if args.verbose:
+            log.info("Floodfilling spines masks")
+
+        floodfill_stacks(fn=stack_list)
+
+        if args.verbose:
+            log.info(
+                "Floodfilled spines masks. For training model, rerun the script without -flo (--floodfill)"
+            )
+        return
 
     # Separate training and test (validation) data.
     # By default, train_test_split will use a random 25% of the available data for validation and
@@ -166,6 +174,12 @@ if __name__ == "__main__":
         type=int,
         default=8,
         help="Filters to be used for the model. Default to 8.",
+    )
+    parser.add_argument(
+        "-flo",
+        "--floodfill",
+        action="store_true",
+        help="Whether to floodfill masks before training.",
     )
     parser.add_argument(
         "-lr",
