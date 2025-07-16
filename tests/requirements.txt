@@ -5,3 +5,9 @@ numpy
 tifffile
 rich
 msr-reader
+scikit-learn
+pandas
+matplotlib
+scipy
+argparse
+segmentation-models
