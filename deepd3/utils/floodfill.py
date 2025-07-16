@@ -1,7 +1,9 @@
-import numpy as np
-from collections import deque
-from skimage.measure import label
+import gc
 import tifffile
+import numpy as np
+import skimage as sk
+import scipy.ndimage as ndi
+from collections import deque
 
 
 def get_neighborhood(x, y, z, shape):
@@ -17,120 +19,195 @@ def get_neighborhood(x, y, z, shape):
     Returns:
         array: 1D array with all 27 neighbors of the given 3D point.
     """
-    x, y, z = int(round(x)), int(round(y)), int(round(z))
+    z, y, x = int(round(z)), int(round(y)), int(round(x))
     neighbors = []
     for i in range(-1, 2):
         for j in range(-1, 2):
             for k in range(-1, 2):
                 if i + j + k == 0:
                     continue
-                nx, ny, nz = x + i, y + j, z + k
+                nz, ny, nx = z + k, y + j, x + i
                 if 0 <= nz < shape[0] and 0 <= ny < shape[1] and 0 <= nx < shape[2]:
-                    neighbors.append((nx, ny, nz))
+                    neighbors.append((nz, ny, nx))
     return neighbors
 
 
-def floodfill_impl(img, initial_mask, max_voxels=None, forbidden_mask=None, alpha=0.8):
-    """Flood-fills a spine region across Z slices from sparse mask annotations,
+def get_medoid(mask):
+    """Gets the medoid of a mask.
+
+    Args:
+        mask (array): 3D array storing the binary mask to calculate the medoid for.
+
+    Returns:
+        tuple: 3D coordinates of the medoid.
+    """
+    coords = np.argwhere(mask)
+    dists = np.sum(np.linalg.norm(coords[:, None] - coords[None, :], axis=2), axis=1)
+    medoid_index = np.argmin(dists)
+    z_medoid, y_medoid, x_medoid = coords[medoid_index]
+    return z_medoid, y_medoid, x_medoid
+
+
+def floodfill_impl(
+    img, initial_mask, dimg, forbidden_mask=None, alpha=0.85, dendrite_ff=False
+):
+    """Flood-fills spine mask labeled with 'label_id' across Z slices from sparse mask annotations,
     using intensity and 3D connectivity. Optionally excludes 'forbidden' voxels.
 
     Args:
         img (array): 3D image stack (Z, Y, X).
-        initial_mask (array): 3D binary mask for current spine.
-        max_voxels (int): optional cap on max number of voxels to include.
+        initial_mask (array): 3D binary mask for current spine/dendrite.
         forbidden_mask (array): 3D binary mask where fill is not allowed (e.g. dendrite).
         alpha (float): parameter that determines the cut on intensity for a voxel to be chosen as seed.
-                       Default ot 0.8.
+                       Default to 0.85. Should belong to [0, 1].
 
     Returns:
         array: 3D binary mask after flood-fill.
     """
-    final_mask = np.zeros_like(img, dtype=bool)
+    # Sanity check
+    alpha = max(min(alpha, 1.0), 0.0)
+    if forbidden_mask is None:
+        forbidden_mask = np.zeros_like(img, dtype=np.uint8)
+
+    # Binary masks to control the visited neighbors and the mask bits added
+    visited_mask = np.zeros_like(img, dtype=np.uint8)
+    final_mask = np.zeros_like(img, dtype=np.uint8)
     final_mask[initial_mask] = True
 
-    # Use a high-intensity voxel from the mask as seed
+    # Spines sometimes have complex shapes, so the centroid may fall in background. Use a center
+    # calculated from the weighted medians instead.
+    # When floodfilling the dendrite, use max brightness pixel.
     zyx_coords = np.argwhere(initial_mask)
-    seed_z, seed_y, seed_x = zyx_coords[np.argmax(img[initial_mask])]
-    seed_intensity = float(img[seed_z, seed_y, seed_x])
-    threshold = min(seed_intensity * alpha,
-                    np.percentile(img[initial_mask], 85))
+    initial_intensities = img[initial_mask]
+    cz, cy, cx = (
+        zyx_coords[np.argmax(initial_intensities)]
+        if dendrite_ff
+        else get_medoid(initial_mask)
+    )
 
-    # Initialize queue
+    # Intensities vary along the spine, and we at least want to select the current masked pixels.
+    # For finding a good threshold, we first remove the outliers (e.g. if some background pixels where mistakenly
+    # masked, those will have ~0 intensity, much lower than spine pixels), and then we set as threshold the median
+    # intensity from all the intensities left.
+    p_low, p_high = np.percentile(initial_intensities, [5, 95])
+    cleaned_intensities = initial_intensities[
+        (initial_intensities > p_low) & (initial_intensities < p_high)
+    ]
+    if cleaned_intensities.size == 0:
+        threshold = np.median(initial_intensities)
+    else:
+        threshold = np.median(cleaned_intensities)
+
+    # Additionally, for a more robust floodfill search, we include the pixel with an intensity closest to the median
+    # as seed. This avoids that if the centroid of the mask falls in a background pixel (e.g. if the mask included pixels
+    # that are actually background) then we have at least a seed that is in the actual spine.
+    closest_voxel = np.argmin(np.abs(initial_intensities - threshold))
+    mz, my, mx = zyx_coords[closest_voxel]
+
+    # Initialize queue with centroid and pixel with median intensity
     queue = deque()
-    queue.extend(get_neighborhood(seed_x, seed_y, seed_z, img.shape))
+    queue.extend(get_neighborhood(cz, cy, cx, img.shape))
+    queue.extend(get_neighborhood(mz, my, mx, img.shape))
 
-    # Loop over neightbors
+    # First derivative values for centroid's brightness interpolation.
+    img_z_grad = dimg / 2
+
+    # Loop over neighbors.
     while queue:
-        x, y, z = queue.popleft()
-        # Bounds check
-        if not (
-            0 <= z < img.shape[0] and 0 <= y < img.shape[1] and 0 <= x < img.shape[2]
-        ):
+        current = queue.popleft()
+        z, y, x = current
+
+        # Skip if voxel is already visited or forbidden.
+        if visited_mask[z, y, x]:
             continue
-        # Already visited or forbidden voxels are discarded
-        if final_mask[z, y, x]:
+        else:
+            visited_mask[z, y, x] = True
+        if forbidden_mask[:, y, x].any():
             continue
-        if forbidden_mask is not None and forbidden_mask[z, y, x]:
+
+        # If voxel is not bright enough, we might have encountered a boundary.
+        # Interpolate threshold from centroid's by decreasing the threshold when we move
+        # to less bright areas.
+        delta_z = abs(mz - z)
+        z_grad = img_z_grad[z, y, x]
+        taylor_1_threshold = threshold + z_grad * delta_z
+        if img[z, y, x] < taylor_1_threshold:
             continue
-        # Intensity check. If intense enough, the neightbor is added to the mask
-        if img[z, y, x] > threshold:
-            final_mask[z, y, x] = True
-            neighbors = get_neighborhood(x, y, z, img.shape)
-            for nx, ny, nz in neighbors:
-                if forbidden_mask is not None and forbidden_mask[nz, ny, nx]:
-                    continue
-                if final_mask[nz, ny, nx]:
-                    continue
-                queue.append((nx, ny, nz))
-            if max_voxels is not None and np.count_nonzero(final_mask) > max_voxels:
-                print(
-                    f"Floodfill aborted: number of voxels added ({np.count_nonzero(final_mask)}) exceeded max_voxels ({max_voxels})"
-                )
-                break
+
+        # Add accepted voxel to the mask and its neighbors to the queue.
+        final_mask[z, y, x] = True
+        neighbors = get_neighborhood(z, y, x, img.shape)
+        for nz, ny, nx in neighbors:
+            queue.append((nz, ny, nx))
+
     return final_mask
 
 
-def floodfill(stack, dendrite_mask, spines_masks):
+def floodfill(stack, dendrite_mask, spines_mask):
     """Flood-fills the spines' masks from a sparsely annotated image across Z slices. Uses the
        dendrite mask as 'black list' for avoiding flood-filling past the dendrite boundary.
 
     Args:
         stack (array): original 3D image stack (Z, Y, X) in array representation
-        spines_masks (array): 3D binary mask for all the spines
+        spines_mask (array): 3D binary mask for all the spines
         dendrite_mask (array): 3D binary mask for the dendrite
 
     Returns:
         array: 3D binary mask of spines after flood-filling
     """
-    # Get all spine labels and excluding the background (label = 0)
-    L = label(spines_masks)
+    # Get all spine labels and excluding the background (label = 0).
+    L, _ = ndi.label(spines_mask)
     labels = np.unique(L)
     labels = labels[labels != 0]
 
-    # Initialize final mask to accumulate filled results
-    final_mask = np.zeros_like(L, dtype=bool)
+    # Initialize final mask to accumulate filled results.
+    final_spines_mask = np.zeros_like(L, dtype=np.uint8)
 
-    # Store diff to analyze floodfill result later
-    diff_map = np.zeros_like(L, dtype=np.int8)
+    # Get image derivative (intensity change rates) in OZ.
+    denoised = np.memmap(
+        'denoised.dat', dtype=stack.dtype, mode='w+', shape=stack.shape
+    )
+    ndi.median_filter(stack, size=3, output=denoised)
+    threshold = sk.filters.threshold_triangle(denoised)
+    dimg = np.zeros_like(denoised)
+    np.multiply(denoised, denoised > threshold, out=dimg, where=denoised > threshold)
+    dimg = ndi.prewitt(dimg, axis=0)
 
-    # Extend dendrite mask over the whole Z axis
-    dendrite_mask_combined = np.any(dendrite_mask, axis=0)
-    dendrite_mask_broad = np.broadcast_to(
-        dendrite_mask_combined, dendrite_mask.shape)
+    # Get dendrite mask and extend it over the whole Z axis for avoiding floodfilling spines into dendrite.
+    dendrite_mask_broad = np.any(dendrite_mask, axis=0)
+    dendrite_mask_broad = np.broadcast_to(dendrite_mask_broad, dendrite_mask.shape)
 
-    # Loop through all spines
+    # Floodfill the broadcast mask to account for blurriness of the dendrite.
+    spines_mask_broad = np.any(spines_mask, axis=0)
+    spines_mask_broad = np.broadcast_to(spines_mask_broad, spines_mask.shape)
+    dendrite_mask_ff = floodfill_impl(
+        img=stack,
+        initial_mask=dendrite_mask_broad,
+        forbidden_mask=spines_mask_broad,
+        dimg=dimg,
+        alpha=0.7,
+        dendrite_ff=True,
+    )
+
+    forbidden_mask = (dendrite_mask_broad | dendrite_mask_ff) & ~spines_mask
+
+    # Delete unused arrays.
+    del denoised, dendrite_mask_broad, spines_mask_broad, dendrite_mask_ff
+    gc.collect()
+
+    # Loop through all spines.
     for label_id in labels:
         mask = L == label_id
-        filled = floodfill_impl(
-            img=stack, initial_mask=mask, forbidden_mask=dendrite_mask_broad
-        )
-        # Accumulate into final mask
-        final_mask |= filled
-        # Compute accumulated difference map
-        diff = filled.astype(int) - mask.astype(int)
-        diff_map += diff.astype(np.int8)
 
-    return final_mask, diff_map
+        # Floodfill and acumulate into final mask.
+        final_spines_mask |= floodfill_impl(
+            img=stack,
+            initial_mask=mask,
+            forbidden_mask=forbidden_mask,
+            dimg=dimg,
+        )
+
+    return final_spines_mask
 
 
 def floodfill_stacks(fn):
@@ -140,16 +217,13 @@ def floodfill_stacks(fn):
         fn (str): A list of paths to the data stacks. They should be raw images, d3set is not supported yet.
     """
     for i in range(len(fn)):
-        img = tifffile.imread(fn[i]['img'])
-        d_mask = tifffile.imread(fn[i]['d_mask'])
-        s_masks = tifffile.imread(fn[i]['s_masks'])
-        spines_mask_data_ff, diff_map = floodfill(
+        img = tifffile.memmap(fn[i]['img'])
+        d_mask = tifffile.memmap(fn[i]['d_mask'])
+        s_masks = tifffile.memmap(fn[i]['s_masks'])
+        spines_mask_data_ff = floodfill(
             stack=img,
             dendrite_mask=d_mask,
-            spines_masks=s_masks,
+            spines_mask=s_masks,
         )
-        # Only write back to disk if floodfilling made any difference
-        if np.any(diff_map):
-            tifffile.imwrite(fn[i]['s_masks'], spines_mask_data_ff)
-            print(
-                f"Spines masks from stack {i} were floodfilled with {np.sum(diff_map)} voxels")
+        tifffile.imwrite(fn[i]['s_masks'], spines_mask_data_ff)
+        print(f'Spines masks from stack {i} ({fn[i]['img']}) have been floodfilled')
