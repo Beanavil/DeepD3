@@ -4,6 +4,7 @@ import numpy as np
 import skimage as sk
 import scipy.ndimage as ndi
 from collections import deque
+from scipy.spatial.distance import cdist
 
 
 def get_neighborhood(x, y, z, shape):
@@ -32,20 +33,25 @@ def get_neighborhood(x, y, z, shape):
     return neighbors
 
 
-def get_medoid(mask):
+def get_medoid(mask, max_coords=10000):
     """Gets the medoid of a mask.
 
     Args:
         mask (array): 3D array storing the binary mask to calculate the medoid for.
-
+        max_cords (int): Max number of mask elements to consider for medoid, ensuring controlled memory use. Default to 10000.
     Returns:
         tuple: 3D coordinates of the medoid.
     """
-    coords = np.argwhere(mask)
-    dists = np.sum(np.linalg.norm(coords[:, None] - coords[None, :], axis=2), axis=1)
-    medoid_index = np.argmin(dists)
-    z_medoid, y_medoid, x_medoid = coords[medoid_index]
-    return z_medoid, y_medoid, x_medoid
+    coords = np.argwhere(mask > 0)
+    if len(coords) <= max_coords:
+        dists = cdist(coords, coords).astype(np.float32)
+        medoid_index = np.argmin(dists.sum(axis=1))
+        return coords[medoid_index]
+    random_idxs = np.random.choice(len(coords), max_coords, replace=False)
+    random_coords = coords[random_idxs]
+    dists = cdist(random_coords, coords).astype(np.float32)
+    medoid_index = np.argmin(dists.sum(axis=1))
+    return random_coords[medoid_index]
 
 
 def floodfill_impl(
