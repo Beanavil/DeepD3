@@ -1,5 +1,5 @@
 # Local imports
-from scripts.utils.generic_utils import mm_to_inches, m_to_um
+from scripts.utils.plot_utils import mm_to_inches, m_to_um
 
 # Others
 import os
@@ -61,7 +61,7 @@ def plot_res_distribution(in_folder: str, out_folder: str, animal: str):
         tf.write("\\end{tabular}\n")
 
     # Generate vector graphics plot.
-    plt.figure(figsize=(mm_to_inches(args.fig_height), mm_to_inches(args.fig_width)))
+    plt.figure(figsize=(mm_to_inches(args.fig_width), mm_to_inches(args.fig_height)))
     for z, group_df in df.groupby("res_z"):
         xy_res = group_df[["res_xy"]].values
         plt.scatter([z] * len(xy_res), xy_res[:, 0], label=f"{z:.4f} um", alpha=0.7)
@@ -71,11 +71,8 @@ def plot_res_distribution(in_folder: str, out_folder: str, animal: str):
     plt.title(f"Resolution distribution for {animal}")
     plt.grid(True)
     plt.tight_layout()
-
-    # Save as vector PDF
-    png_path = os.path.join(out_folder, f"{animal}_res_plot.png")
-    plt.savefig(png_path, format="png", dpi=300)
-
+    plt.savefig(os.path.join(out_folder, f"{animal}_res_plot.pdf"), format="pdf", dpi=300)
+    plt.close()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
