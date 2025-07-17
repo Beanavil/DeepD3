@@ -184,9 +184,7 @@ def process_mat(mat_paths, base, out_folder, verbose, log, z_thresh=1.5):
             continue
 
         h5df_data = file["mask"]
-        curr_label_stack = label_masks(
-            h5df_data
-        )  # Your function that returns labeled 3D mask
+        curr_label_stack = label_masks(h5df_data)
 
         if merged_stack is None:
             merged_stack = np.zeros_like(curr_label_stack, dtype=np.uint16)
@@ -206,11 +204,11 @@ def process_mat(mat_paths, base, out_folder, verbose, log, z_thresh=1.5):
         log.warning(f"        No valid masks found for base {base}. Skipping.")
         return None
 
-    # Optional: save merged labeled mask as .mat
-    mat_save_path = os.path.join(out_folder, f"{base}_merged_labels.mat")
-    scipy.io.savemat(mat_save_path, {"merged_labels": merged_stack})
+    # Save merged labeled mask as tif
+    tif_save_path = os.path.join(out_folder, f"{base}_merged_labels.tif")
+    tf.imwrite(tif_save_path, merged_stack)
     if verbose:
-        log.info(f"        Saved merged labeled mask as .mat: {mat_save_path}")
+        log.info(f"        Saved merged labeled mask as .mat: {tif_save_path}")
 
     # Now split into spines and dendrite
     spine_labels, dendrite_labels, threshold = split_labels_by_size(
