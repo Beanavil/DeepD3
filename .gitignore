@@ -147,3 +147,4 @@ test_images/
 
 # extra
 rough.ipynb
+*.dat

@@ -1,3 +1,7 @@
+# Local imports
+from scripts.utils.generic_utils import mm_to_inches, m_to_um
+
+# Others
 import os
 import glob
 import json
@@ -10,20 +14,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 
-def truncate(f, n):
-    factor = 10.0**n
-    return int(f * factor) / factor
-
-
-def mm_to_inches(mm):
-    return mm / 25.4
-
-
-def m_to_um(res_in_m):
-    return truncate(res_in_m * 1e6, 4)
-
-
-def get_res_distribution(in_folder: str, out_folder: str, animal: str):
+def plot_res_distribution(in_folder: str, out_folder: str, animal: str):
     # Get all metadata files.
     meta_files = glob.glob(f"{in_folder}/*_meta.json")
 
@@ -82,13 +73,13 @@ def get_res_distribution(in_folder: str, out_folder: str, animal: str):
     plt.tight_layout()
 
     # Save as vector PDF
-    pdf_path = os.path.join(out_folder, f"{animal}_res_plot.pdf")
-    plt.savefig(pdf_path, format="pdf")
+    png_path = os.path.join(out_folder, f"{animal}_res_plot.png")
+    plt.savefig(png_path, format="png", dpi=300)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        prog="get_res_distribution",
+        prog="plot_res_distribution",
         description="Get resolutions distribution for BIMAP P4 turtle and mice brain images for training/validation",
     )
 
@@ -176,7 +167,7 @@ if __name__ == "__main__":
         for subfolder in data_subfolders:
             if args.verbose:
                 log.info(f"    Processing metadata from {subfolder}")
-            get_res_distribution(
+            plot_res_distribution(
                 in_folder=subfolder, out_folder=out_folder, animal=animal
             )
             if args.verbose:

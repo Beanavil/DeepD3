@@ -1,5 +1,5 @@
 # Local imports
-from test_utils import add_file_as_tuple, process_obf, process_mat
+from scripts.utils.generic_utils import add_file_as_tuple, process_obf, process_mat
 
 # Others
 import os

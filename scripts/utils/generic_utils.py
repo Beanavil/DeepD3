@@ -5,7 +5,6 @@ import cv2
 import json
 import h5py
 import tensorflow
-import scipy
 import numpy as np
 import tifffile as tf
 from scipy import ndimage
@@ -41,8 +40,6 @@ def sharpness(img):
     sharpness_vals = []
     for i in range(img.shape[0]):
         z_img = img[i]
-        # if z_img.dtype != np.uint8:
-        #     z_img = cv2.normalize(z_img, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
         lap_var = laplacian_var(z_img)
         sharpness_vals.append(lap_var)
     return sum(sharpness_vals) / len(sharpness_vals)
@@ -106,6 +103,7 @@ def process_obf(obf_path, base, out_folder, log):
     except Exception as e:
         log.warning(f"Skipping {obf_path} due to error: {e}")
         return
+
 
 
 def split_labels_by_size(label_stack, z_thresh=1.5):
