@@ -8,7 +8,7 @@ import os
 
 os.environ["SM_FRAMEWORK"] = "tf.keras"
 import segmentation_models as sm
-from scripts.scripts_utils import add_file, schedule
+from scripts.utils.generic_utils import add_file, schedule
 
 # Others
 import glob
