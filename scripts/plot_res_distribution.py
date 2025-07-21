@@ -8,6 +8,7 @@ import json
 import logging
 import pathlib
 import argparse
+import matplotlib
 import rich.logging
 from itertools import groupby
 import pandas as pd
@@ -61,7 +62,7 @@ def plot_res_distribution(in_folder: str, out_folder: str, animal: str):
         tf.write("\\end{tabular}\n")
 
     # Generate vector graphics plot.
-    plt.figure(figsize=(mm_to_inches(args.fig_width), mm_to_inches(args.fig_height)))
+    plt.figure()
     for z, group_df in df.groupby("res_z"):
         xy_res = group_df[["res_xy"]].values
         plt.scatter([z] * len(xy_res), xy_res[:, 0], label=f"{z:.4f} um", alpha=0.7)
@@ -114,9 +115,22 @@ if __name__ == "__main__":
         default=180,
         help="Figure width for resolution distribution plot, in millimeters. Default to 180.",
     )
+    parser.add_argument(
+        "-s",
+        "--fontsize",
+        type=int,
+        default=6,
+        help="Font size to be used in the plots. Default to 6pt. Must be >= 5 and <= 7",
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
 
     args = parser.parse_args()
+
+    # Set plot style to be Nature's compliant
+    matplotlib.rcParams['figure.figsize'] = mm_to_inches(args.fig_width),mm_to_inches(args.fig_height)
+    matplotlib.rcParams["font.size"] = args.fontsize
+    matplotlib.rcParams['font.family'] = "sans-serif"
+    matplotlib.rcParams["font.sans-serif"] = "Helvetica"
 
     # Add a logger and a log file.
     log_level = logging.INFO

@@ -12,11 +12,13 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 
-def generate_plot(df, out_name, out_folder, height, width):
+def generate_plot(df, out_name, out_folder):
     epochs = df["epoch"]
 
     # Plots for loss
-    _, ax = plt.subplots(1, 2, figsize=(width, height))
+    _, ax = plt.subplots(1, 2)
+    ax[0].spines['top'].set_visible(False)
+    ax[0].spines['right'].set_visible(False)
     ax[0].plot(
         epochs, df["loss"], label="Training loss", color="blue"
     )  # linestyle='--', marker='o')
@@ -24,6 +26,8 @@ def generate_plot(df, out_name, out_folder, height, width):
     ax[0].set_ylabel("total loss [au]")
     ax[0].set_xlabel("epoch")
 
+    ax[1].spines['top'].set_visible(False)
+    ax[1].spines['right'].set_visible(False)
     ax[1].plot(epochs, df["val_loss"], label="Validation loss", color="blue")
     ax[1].set_title("Validation loss")
     ax[1].set_ylabel("total loss [au]")
@@ -34,12 +38,16 @@ def generate_plot(df, out_name, out_folder, height, width):
     plt.close()
 
     # Plots for dendrites' iou
-    _, ax = plt.subplots(1, 2, figsize=(width, height))
+    _, ax = plt.subplots(1, 2)
+    ax[0].spines['top'].set_visible(False)
+    ax[0].spines['right'].set_visible(False)
     ax[0].plot(epochs, df["dendrites_iou_score"], label="Training", color="blue")
     ax[0].set_title("Dendrites - Training")
     ax[0].set_ylabel("IoU Score")
     ax[0].set_xlabel("epoch")
 
+    ax[1].spines['top'].set_visible(False)
+    ax[1].spines['right'].set_visible(False)
     ax[1].plot(epochs, df["val_dendrites_iou_score"], label="Validation", color="blue")
     ax[1].set_title("Dendrites - Validation")
     ax[1].set_ylabel("IoU Score")
@@ -52,12 +60,16 @@ def generate_plot(df, out_name, out_folder, height, width):
     plt.close()
 
     # Plots for spines' iou
-    _, ax = plt.subplots(1, 2, figsize=(width, height))
+    _, ax = plt.subplots(1, 2)
+    ax[0].spines['top'].set_visible(False)
+    ax[0].spines['right'].set_visible(False)
     ax[0].plot(epochs, df["spines_iou_score"], label="Training", color="blue")
     ax[0].set_title("Spines  Training")
     ax[0].set_ylabel("IoU Score")
     ax[0].set_xlabel("epoch")
 
+    ax[1].spines['top'].set_visible(False)
+    ax[1].spines['right'].set_visible(False)
     ax[1].plot(epochs, df["val_spines_iou_score"], label="Validation", color="blue")
     ax[1].set_title("Spines - Validation")
     ax[1].set_ylabel("IoU Score")
@@ -114,15 +126,18 @@ if __name__ == "__main__":
         "-s",
         "--fontsize",
         type=int,
-        default=8,
-        help="Font size to be used in the plots. Default to 8.",
+        default=6,
+        help="Font size to be used in the plots. Default to 6pt.",
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
 
     args = parser.parse_args()
 
-    # Set fontsize
-    matplotlib.rcParams.update({"font.size": args.fontsize})
+    # Set plot style to be Nature's compliant
+    matplotlib.rcParams['figure.figsize'] = mm_to_inches(args.fig_width),mm_to_inches(args.fig_height)
+    matplotlib.rcParams["font.size"] = args.fontsize
+    matplotlib.rcParams['font.family'] = "sans-serif"
+    matplotlib.rcParams["font.sans-serif"] = "Helvetica"
 
     # Add a logger and a log file.
     log_level = logging.INFO
@@ -166,9 +181,7 @@ if __name__ == "__main__":
         generate_plot(
             df=df,
             out_name=out_name,
-            out_folder=out_folder,
-            height=mm_to_inches(args.fig_height),
-            width=mm_to_inches(args.fig_width),
+            out_folder=out_folder
         )
 
     if args.verbose:
