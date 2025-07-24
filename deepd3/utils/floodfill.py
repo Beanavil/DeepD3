@@ -7,13 +7,13 @@ from collections import deque
 from scipy.spatial.distance import cdist
 
 
-def get_neighborhood(x, y, z, shape):
+def get_neighborhood(z, y, x, shape):
     """Gets the neightboring voxels of an (x,y,z) point in a 3D image of shape 'shape'.
 
     Args:
-        x (int): coordinate of the point to get the neightborhood for in the OX axis.
-        y (int): coordinate of the point to get the neightborhood for in the OY axis.
-        z (int): coordinate of the point to get the neightborhood for in the OZ axis.
+        x (int): coordinate of the point to get the neighborhood for in the OX axis.
+        y (int): coordinate of the point to get the neighborhood for in the OY axis.
+        z (int): coordinate of the point to get the neighborhood for in the OZ axis.
         shape (array): 1D array with three elements, storing the Z, Y and X dimensions of the image
                        (strictly in that order).
 
@@ -132,7 +132,7 @@ def floodfill_impl(
             continue
 
         # If voxel is not bright enough, we might have encountered a boundary.
-        # Interpolate threshold from centroid's by decreasing the threshold when we move
+        # Interpolate threshold from median brightness's by decreasing the threshold when we move
         # to less bright areas.
         delta_z = abs(mz - z)
         z_grad = img_z_grad[z, y, x]
@@ -223,13 +223,13 @@ def floodfill_stacks(fn):
         fn (str): A list of paths to the data stacks. They should be raw images, d3set is not supported yet.
     """
     for i in range(len(fn)):
-        img = tifffile.memmap(fn[i]['img'])
-        d_mask = tifffile.memmap(fn[i]['d_mask'])
-        s_masks = tifffile.memmap(fn[i]['s_masks'])
+        img = tifffile.memmap(fn[i]["img"])
+        d_mask = tifffile.memmap(fn[i]["d_mask"])
+        s_masks = tifffile.memmap(fn[i]["s_masks"])
         spines_mask_data_ff = floodfill(
             stack=img,
             dendrite_mask=d_mask,
             spines_mask=s_masks,
         )
-        tifffile.imwrite(fn[i]['s_masks'], spines_mask_data_ff)
-        print(f'Spines masks from stack {i} ({fn[i]['img']}) have been floodfilled')
+        tifffile.imwrite(fn[i]["s_masks"], spines_mask_data_ff.astype(np.uint8) * 255)
+        print(f"Spines masks from stack {i} ({fn[i]['img']}) have been floodfilled")
