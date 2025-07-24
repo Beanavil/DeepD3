@@ -55,7 +55,7 @@ def get_medoid(mask, max_coords=10000):
 
 
 def floodfill_impl(
-    img, initial_mask, dimg, forbidden_mask=None, alpha=0.85, dendrite_ff=False
+    img, initial_mask, dimg, min_threshold, forbidden_mask=None, dendrite_ff=False
 ):
     """Flood-fills spine mask labeled with 'label_id' across Z slices from sparse mask annotations,
     using intensity and 3D connectivity. Optionally excludes 'forbidden' voxels.
@@ -71,13 +71,12 @@ def floodfill_impl(
         array: 3D binary mask after flood-fill.
     """
     # Sanity check
-    alpha = max(min(alpha, 1.0), 0.0)
     if forbidden_mask is None:
-        forbidden_mask = np.zeros_like(img, dtype=np.uint8)
+        forbidden_mask = np.zeros_like(img, dtype=bool)
 
     # Binary masks to control the visited neighbors and the mask bits added
-    visited_mask = np.zeros_like(img, dtype=np.uint8)
-    final_mask = np.zeros_like(img, dtype=np.uint8)
+    visited_mask = np.zeros_like(img, dtype=bool)
+    final_mask = np.zeros_like(img, dtype=bool)
     final_mask[initial_mask] = True
 
     # Spines sometimes have complex shapes, so the centroid may fall in background. Use a center
@@ -109,6 +108,16 @@ def floodfill_impl(
     # that are actually background) then we have at least a seed that is in the actual spine.
     closest_voxel = np.argmin(np.abs(initial_intensities - threshold))
     mz, my, mx = zyx_coords[closest_voxel]
+
+    # Never allow a too low threshold brightness for corner cases in which spines are not very bright.
+    if not dendrite_ff:
+        threshold = max(threshold, min_threshold, img[cz, cy, cx], img[mz, my, mx])
+    else:
+        threshold = max(threshold, min_threshold)
+
+    # Sanity check
+    if not img[mz, my, mx] or not threshold or not img[cz, cy, cx]:
+        return final_mask
 
     # Initialize queue with centroid and pixel with median intensity
     queue = deque()
@@ -161,37 +170,39 @@ def floodfill(stack, dendrite_mask, spines_mask):
     Returns:
         array: 3D binary mask of spines after flood-filling
     """
+    # Sanity check
+    if not dendrite_mask.any() or not spines_mask.any():
+        return spines_mask
+
     # Get all spine labels and excluding the background (label = 0).
     L, _ = ndi.label(spines_mask)
     labels = np.unique(L)
     labels = labels[labels != 0]
 
     # Initialize final mask to accumulate filled results.
-    final_spines_mask = np.zeros_like(L, dtype=np.uint8)
+    final_spines_mask = np.zeros_like(L, dtype=bool)
 
     # Get image derivative (intensity change rates) in OZ.
     denoised = np.memmap(
-        'denoised.dat', dtype=stack.dtype, mode='w+', shape=stack.shape
+        "denoised.dat", dtype=stack.dtype, mode="w+", shape=stack.shape
     )
     ndi.median_filter(stack, size=3, output=denoised)
     threshold = sk.filters.threshold_triangle(denoised)
     dimg = np.zeros_like(denoised)
-    np.multiply(denoised, denoised > threshold, out=dimg, where=denoised > threshold)
+    np.multiply(denoised, denoised > threshold, out=dimg)
     dimg = ndi.prewitt(dimg, axis=0)
 
     # Get dendrite mask and extend it over the whole Z axis for avoiding floodfilling spines into dendrite.
-    dendrite_mask_broad = np.any(dendrite_mask, axis=0)
+    dendrite_mask_broad = np.any((dendrite_mask > 0), axis=0)
     dendrite_mask_broad = np.broadcast_to(dendrite_mask_broad, dendrite_mask.shape)
-
-    # Floodfill the broadcast mask to account for blurriness of the dendrite.
     spines_mask_broad = np.any(spines_mask, axis=0)
     spines_mask_broad = np.broadcast_to(spines_mask_broad, spines_mask.shape)
     dendrite_mask_ff = floodfill_impl(
         img=stack,
-        initial_mask=dendrite_mask_broad,
+        initial_mask=(dendrite_mask > 0),
         forbidden_mask=spines_mask_broad,
         dimg=dimg,
-        alpha=0.7,
+        min_threshold=np.percentile(stack[dendrite_mask > 0], 25),
         dendrite_ff=True,
     )
 
@@ -201,16 +212,19 @@ def floodfill(stack, dendrite_mask, spines_mask):
     del denoised, dendrite_mask_broad, spines_mask_broad, dendrite_mask_ff
     gc.collect()
 
+    # Global-pov threshold.
+    min_threshold = np.percentile(stack[spines_mask > 0], 50)
+
     # Loop through all spines.
     for label_id in labels:
         mask = L == label_id
-
         # Floodfill and acumulate into final mask.
         final_spines_mask |= floodfill_impl(
             img=stack,
             initial_mask=mask,
             forbidden_mask=forbidden_mask,
             dimg=dimg,
+            min_threshold=min_threshold,
         )
 
     return final_spines_mask
