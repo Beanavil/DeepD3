@@ -221,12 +221,6 @@ def process_mat(mat_paths, base, out_folder, verbose, log, z_thresh=1.5):
         log.warning(f"        No valid masks found for base {base}. Skipping.")
         return None
 
-    # Save merged labeled mask as tif
-    tif_save_path = os.path.join(out_folder, f"{base}_merged_labels.tif")
-    tf.imwrite(tif_save_path, merged_stack)
-    if verbose:
-        log.info(f"        Saved merged labeled mask as .mat: {tif_save_path}")
-
     # Now split into spines and dendrite. If no merging was needed (only one mat file provided)
     # then we keep the old simple approach. Otherwise, we need a more complex procedure to
     # discern the (several) dendrites from the spines.
@@ -240,7 +234,9 @@ def process_mat(mat_paths, base, out_folder, verbose, log, z_thresh=1.5):
     else:
         spines, dendrite, dendrite_idx = split_masks(merged_stack)
         dendrite_labels = [dendrite_idx]
-        spine_labels = [i for i in range(1, merged_stack.max() + 1) if i != dendrite_idx]
+        spine_labels = [
+            i for i in range(1, merged_stack.max() + 1) if i != dendrite_idx
+        ]
         threshold = 0
 
     label_dict = {
