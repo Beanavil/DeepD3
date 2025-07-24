@@ -4,10 +4,12 @@ import re
 import cv2
 import json
 import h5py
+import math
 import tensorflow
 import numpy as np
 import tifffile as tf
 from scipy import ndimage
+from skimage import exposure
 from msr_reader import OBFFile
 
 common_stack_name_re = r"(\d{4}-\d{2}-\d{2}-m\d+)"
@@ -59,6 +61,27 @@ def to_uint8_minmax(img):
     return (img_norm * 255).astype(np.uint8)
 
 
+def next_power_of_2(x):
+    return 1 if x == 0 else 2 ** math.ceil(math.log2(x))
+
+
+def to_uint8_rescale(img, gamma=0.67):
+    """Converts an image in float32 to uint8. If necessary, performs gamma correction before
+    downcasting to uint8.
+
+    Gamma coefficient used based on https://web.ece.ucsb.edu/Faculty/Manjunath/courses/ece178W03/EnhancePart1.pdf.
+    """
+    img_max = img.max()
+    p2_max = next_power_of_2(img_max)
+    # If values in image fit in an uint8, we only do min-max conversion.
+    if p2_max == 256:
+        return to_uint8_minmax(img)
+    # Else, we rescale the image intensities to the proper range [0, 255] and then perform
+    # gamma correction to help preserve the intensity gradients of the original image.
+    img_scale = to_uint8_minmax(img)
+    return exposure.adjust_gamma(img_scale, gamma=gamma)
+
+
 def process_obf(obf_path, base, out_folder, log):
     """Processes an obf file, which corresponds to a group of 3D microscope images,
 
@@ -83,7 +106,7 @@ def process_obf(obf_path, base, out_folder, log):
                     max_sharpness_idx = idx
                     sharpest_stack = img
             out_tif_path = os.path.join(out_folder, f"{base}_stack.tif")
-            tf.imwrite(out_tif_path, to_uint8_minmax(sharpest_stack))
+            tf.imwrite(out_tif_path, to_uint8_rescale(sharpest_stack))
 
             # Save metadata as JSON.
             meta = {
