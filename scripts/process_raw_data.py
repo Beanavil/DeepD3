@@ -49,12 +49,12 @@ def process_raw_data_subfolder(in_folder: str, out_folder: str):
     for base in datasets.keys():
         mat_file_list = datasets[base]['mat']
         if mat_file_list:
-            dendrite_idx = process_mat(
-                mat_file_list, base, out_folder, args.verbose, log
-            )
+            label_dict = process_mat(mat_file_list, base, out_folder, args.verbose, log)
             log.info(
-                f'{base} dataset used {len(mat_file_list)} mat files. stack from {base} dataset using dendrite mask from mask {dendrite_idx}'
+                f"{base} dataset used {len(mat_file_list)} mat files. Stack from {base} dataset using"
             )
+            log.info(f"    dendrite mask from labels: {label_dict['dendrite']}")
+            log.info(f"    spine masks from labels: {label_dict['spines']}")
 
     if args.verbose:
         log.info(f'        Processed mat files')

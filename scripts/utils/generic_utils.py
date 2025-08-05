@@ -140,44 +140,7 @@ def split_masks(stack):
         if pixel_count > max_pixel_count:
             max_pixel_count = pixel_count
             dendrite_idx = idx
-    spines = ((stack > 0) & (stack != dendrite_idx)).astype(np.uint8) * 255
-    dendrite = (stack == dendrite_idx).astype(np.uint8) * 255
-    return spines, dendrite, dendrite_idx
-
-
-def split_labels_by_size(label_stack, z_thresh=1.5):
-    """
-    Splits merged labels into dendrite (large) and spine (small) using z-score size thresholding.
-
-    Parameters:
-        label_stack (ndarray): 3D labeled mask (0 = background)
-        z_thresh (float): Z-score threshold to classify large structures (default = 1.5)
-
-    Returns:
-        spine_labels (list): Label IDs classified as spines
-        dendrite_labels (list): Label IDs classified as dendrites
-        threshold (float): Size threshold used for splitting
-    """
-    labels = np.unique(label_stack)
-    labels = labels[labels != 0]  # remove background label
-
-    label_sizes = {label: np.sum(label_stack == label) for label in labels}
-
-    sizes = np.array(list(label_sizes.values()))
-
-    mean = sizes.mean()
-    std = sizes.std()
-    dendrite_labels = []
-
-    while len(dendrite_labels) == 0:
-        threshold = mean + z_thresh * std
-        dendrite_labels = [
-            label for label, size in label_sizes.items() if size >= threshold
-        ]
-        z_thresh -= 0.1
-    spine_labels = [label for label in labels if label not in dendrite_labels]
-
-    return sorted(spine_labels), sorted(dendrite_labels), threshold
+    return [dendrite_idx]
 
 
 def label_masks(hdf5_mask):
@@ -194,7 +157,6 @@ def label_masks(hdf5_mask):
     curr_mask = hdf5_mask.file[curr_ref][()]
     stack = np.zeros(curr_mask.shape, dtype=np.uint8)
     del curr_mask
-    # gc.collect()
 
     label_idx = 0
     for i in range(hdf5_mask.shape[0]):
@@ -206,16 +168,19 @@ def label_masks(hdf5_mask):
                 # Put mask into stack with 'idx' where originally there were a 1.
                 stack[curr_mask > 0] = label_idx
             del curr_mask
-            # gc.collect()
     return stack
 
 
-def process_mat(mat_paths, base, out_folder, verbose, log, z_thresh=1.5):
-    """Process and merge labeled masks from multiple .mat files for a given dataset."""
+def process_mat(mat_paths, base, out_folder, verbose, log):
+    """Process and, if necessary, merge spines and dendrite masks from .mat file(s) for a given dataset."""
 
-    merged_stack = None  # Will hold combined labeled mask stack
-    label_offset = 0  # Track label offsets to avoid overlaps
-
+    merged_stack = None
+    # When multiple mat files are provided, masks for different branches must be merged.
+    # We thus need to track the label offset to avoid overlaps, and we need to keep record
+    # of which labels are the dendrite (and spines) ones.
+    label_offset = 0
+    dendrite_labels = []
+    spines_labels = []
     for mat_path in mat_paths:
         file = h5py.File(mat_path, "r")
         if "mask" not in file:
@@ -231,11 +196,21 @@ def process_mat(mat_paths, base, out_folder, verbose, log, z_thresh=1.5):
 
         # Shift labels in current stack to avoid overlap
         curr_label_stack = curr_label_stack.astype(np.uint16)
-        curr_label_stack[curr_label_stack > 0] += label_offset
+        curr_label_stack[curr_label_stack >= 0] += label_offset
 
-        # Merge nonzero voxels into merged_stack
-        nonzero_mask = curr_label_stack > 0
-        merged_stack[nonzero_mask] = curr_label_stack[nonzero_mask]
+        # Merge non-background voxels into merged_stack
+        nonback_mask = curr_label_stack > label_offset
+        merged_stack[nonback_mask] = curr_label_stack[nonback_mask]
+
+        # Now split into spines and dendrite. If we have multiple files, the dendrite and spines
+        # of each file are merged with the dendrite and spines, respectively, of previous files.
+        dendrite_idxs = split_masks(curr_label_stack)
+        dendrite_labels += dendrite_idxs
+        spines_labels += [
+            i
+            for i in range(curr_label_stack.min() + 1, curr_label_stack.max() + 1)
+            if i not in dendrite_idxs
+        ]
 
         # Update label_offset for next round
         label_offset = merged_stack.max()
@@ -244,29 +219,10 @@ def process_mat(mat_paths, base, out_folder, verbose, log, z_thresh=1.5):
         log.warning(f"        No valid masks found for base {base}. Skipping.")
         return None
 
-    # Now split into spines and dendrite. If no merging was needed (only one mat file provided)
-    # then we keep the old simple approach. Otherwise, we need a more complex procedure to
-    # discern the (several) dendrites from the spines.
-    if len(mat_paths) > 1:
-        spine_labels, dendrite_labels, threshold = split_labels_by_size(
-            merged_stack, z_thresh=z_thresh
-        )
-        # Create binary masks from labels
-        spines = np.isin(merged_stack, spine_labels).astype(np.uint8) * 255
-        dendrite = np.isin(merged_stack, dendrite_labels).astype(np.uint8) * 255
-    else:
-        spines, dendrite, dendrite_idx = split_masks(merged_stack)
-        dendrite_labels = [dendrite_idx]
-        spine_labels = [
-            i for i in range(1, merged_stack.max() + 1) if i != dendrite_idx
-        ]
-        threshold = 0
+    spines = np.isin(merged_stack, spines_labels).astype(np.uint8) * 255
+    dendrite = np.isin(merged_stack, dendrite_labels).astype(np.uint8) * 255
 
-    label_dict = {
-        "dendrite": dendrite_labels,
-        "spine": spine_labels,
-        "threshold": threshold,
-    }
+    label_dict = {"dendrite": dendrite_labels, "spines": spines_labels}
 
     # Save spines and dendrite masks as TIF.
     tf.imwrite(os.path.join(out_folder, f"{base}_spines.tif"), spines)
