@@ -1,10 +1,12 @@
 import gc
 import tifffile
 import numpy as np
-import skimage as sk
 import scipy.ndimage as ndi
 from collections import deque
+from scipy.ndimage import shift
+from scipy.ndimage import convolve1d
 from scipy.spatial.distance import cdist
+from skimage.registration import phase_cross_correlation
 
 
 def get_neighborhood(z, y, x, shape):
@@ -94,7 +96,7 @@ def floodfill_impl(
     # For finding a good threshold, we first remove the outliers (e.g. if some background pixels where mistakenly
     # masked, those will have ~0 intensity, much lower than spine pixels), and then we set as threshold the median
     # intensity from all the intensities left.
-    p_low, p_high = np.percentile(initial_intensities, [5, 95])
+    p_low, p_high = np.percentile(initial_intensities, [1, 99])
     cleaned_intensities = initial_intensities[
         (initial_intensities > p_low) & (initial_intensities < p_high)
     ]
@@ -104,16 +106,10 @@ def floodfill_impl(
         threshold = np.median(cleaned_intensities)
 
     # Additionally, for a more robust floodfill search, we include the pixel with an intensity closest to the median
-    # as seed. This avoids that if the centroid of the mask falls in a background pixel (e.g. if the mask included pixels
-    # that are actually background) then we have at least a seed that is in the actual spine.
+    # as seed. This helps when the centroid of the mask falls in a background pixel (e.g. if the mask included pixels
+    # that are actually background), so then we have at least a seed that is in the actual spine.
     closest_voxel = np.argmin(np.abs(initial_intensities - threshold))
     mz, my, mx = zyx_coords[closest_voxel]
-
-    # Never allow a too low threshold brightness for corner cases in which spines are not very bright.
-    if not dendrite_ff:
-        threshold = max(threshold, min_threshold, img[cz, cy, cx], img[mz, my, mx])
-    else:
-        threshold = max(threshold, min_threshold)
 
     # Sanity check
     if not img[mz, my, mx] or not threshold or not img[cz, cy, cx]:
@@ -124,28 +120,26 @@ def floodfill_impl(
     queue.extend(get_neighborhood(cz, cy, cx, img.shape))
     queue.extend(get_neighborhood(mz, my, mx, img.shape))
 
-    # First derivative values for centroid's brightness interpolation.
-    img_z_grad = dimg / 2
+    thres_seed = mz, my, mx
 
     # Loop over neighbors.
     while queue:
-        current = queue.popleft()
-        z, y, x = current
+        z, y, x = queue.popleft()
 
         # Skip if voxel is already visited or forbidden.
         if visited_mask[z, y, x]:
             continue
         else:
             visited_mask[z, y, x] = True
-        if forbidden_mask[:, y, x].any():
+        if forbidden_mask[z, y, x]:
             continue
 
         # If voxel is not bright enough, we might have encountered a boundary.
         # Interpolate threshold from median brightness's by decreasing the threshold when we move
         # to less bright areas.
-        delta_z = abs(mz - z)
-        z_grad = img_z_grad[z, y, x]
-        taylor_1_threshold = threshold + z_grad * delta_z
+        delta_z = abs(thres_seed[0] - z)
+        z_grad = dimg[z, y, x]
+        taylor_1_threshold = max(threshold + z_grad * delta_z, min_threshold)
         if img[z, y, x] < taylor_1_threshold:
             continue
 
@@ -156,6 +150,14 @@ def floodfill_impl(
             queue.append((nz, ny, nx))
 
     return final_mask
+
+
+def get_z_derivative(img):
+    kernel = np.array([-0.5, 0, 0.5], dtype=np.float32)
+    dz = convolve1d(
+        input=img, weights=kernel, axis=0, mode="nearest", output=np.float32
+    )
+    return dz
 
 
 def floodfill(stack, dendrite_mask, spines_mask):
@@ -187,33 +189,37 @@ def floodfill(stack, dendrite_mask, spines_mask):
         "denoised.dat", dtype=stack.dtype, mode="w+", shape=stack.shape
     )
     ndi.median_filter(stack, size=3, output=denoised)
-    threshold = sk.filters.threshold_triangle(denoised)
     dimg = np.zeros_like(denoised)
-    np.multiply(denoised, denoised > threshold, out=dimg)
-    dimg = ndi.prewitt(dimg, axis=0)
+    dimg = get_z_derivative(denoised)
 
     # Get dendrite mask and extend it over the whole Z axis for avoiding floodfilling spines into dendrite.
+    # Align masks before broadcasting
+    for z in range(1, stack.shape[0]):
+        shift_yx, _, _ = phase_cross_correlation(denoised[z - 1], denoised[z])
+        dendrite_mask[z] = shift(dendrite_mask[z], shift_yx, order=0)
+        spines_mask[z] = shift(spines_mask[z], shift_yx, order=0)
+
     dendrite_mask_broad = np.any((dendrite_mask > 0), axis=0)
+    spines_mask_broad = np.any((spines_mask > 0), axis=0)
     dendrite_mask_broad = np.broadcast_to(dendrite_mask_broad, dendrite_mask.shape)
-    spines_mask_broad = np.any(spines_mask, axis=0)
     spines_mask_broad = np.broadcast_to(spines_mask_broad, spines_mask.shape)
     dendrite_mask_ff = floodfill_impl(
         img=stack,
-        initial_mask=(dendrite_mask > 0),
+        initial_mask=dendrite_mask_broad,
         forbidden_mask=spines_mask_broad,
         dimg=dimg,
         min_threshold=np.percentile(stack[dendrite_mask > 0], 25),
         dendrite_ff=True,
     )
 
-    forbidden_mask = (dendrite_mask_broad | dendrite_mask_ff) & ~spines_mask
+    forbidden_mask = dendrite_mask_ff
 
     # Delete unused arrays.
     del denoised, dendrite_mask_broad, spines_mask_broad, dendrite_mask_ff
     gc.collect()
 
     # Global-pov threshold.
-    min_threshold = np.percentile(stack[spines_mask > 0], 50)
+    min_threshold = np.percentile(stack[spines_mask > 0], 60)
 
     # Loop through all spines.
     for label_id in labels:
