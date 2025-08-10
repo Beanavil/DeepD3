@@ -57,7 +57,14 @@ class TiledDataGenerator(Sequence):
         self.seed = seed
         self.normalize = normalize
         self.samples_per_epoch = samples_per_epoch
-        self.size = size
+        if len(size) == 2:
+            # Adjust for 2 dimensional images
+            self.size = (1,) + size
+        else:
+            self.size = size
+        self.target_z = self.size[0]
+        self.target_h = self.size[1]
+        self.target_w = self.size[2]
         self.target_resolution = target_resolution
         self.steps_per_epoch = self.samples_per_epoch // self.batch_size
         # Default to 30% of image pixels as minimum masked
@@ -72,9 +79,6 @@ class TiledDataGenerator(Sequence):
 
         self.batch_index = 0
         self.epoch_index = 0
-
-        self.cur_tile_x = 0
-        self.cur_tile_y = 0
 
         # Seed randomness
         random.seed(self.seed)
@@ -123,8 +127,6 @@ class TiledDataGenerator(Sequence):
 
     def on_epoch_end(self):
         self.batch_index = 0
-        self.cur_tile_x = 0
-        self.cur_tile_y = 0
         self.epoch_index += 1
         random.seed(self.seed + self.epoch_index)
         np.random.seed(self.seed + self.epoch_index)
@@ -211,7 +213,7 @@ class TiledDataGenerator(Sequence):
         return aug
 
     def get_sample(self, squeeze=True):
-        """Get a sample from the provided data with significant segmented masks
+        """Get a sample from one of the available stacks with significant segmentation masks
 
         Args:
             squeeze (bool, optional): if plane is 2D, skip 3D. Defaults to True.
@@ -219,29 +221,43 @@ class TiledDataGenerator(Sequence):
         Returns:
             list(np.ndarray, np.ndarray, np.ndarray): stack image with respective labels
         """
+        # Select random stack
         r_stack = np.random.choice(self.n_stacks)
-        max_tile_y = self.meta[r_stack].Height - self.size[1] + 1
-        max_tile_x = self.meta[r_stack].Width - self.size[2] + 1
-        for y in range(self.cur_tile_y, max_tile_y, self.size[1] // 2):
-            start_tile_x = self.cur_tile_x if y == self.cur_tile_y else 0
-            for x in range(start_tile_x, max_tile_x, self.size[2] // 2):
-                r = self._get_sample(x, y, r_stack, squeeze)
-                if r is None:
-                    continue
-                # In either one or both annotations there should be at least `min_content` pixels
-                # that are labelled
-                dend_mask_pixels = (r[1]).sum()
-                spine_mask_pixels = (r[2]).sum()
-                if dend_mask_pixels > self.min_content or spine_mask_pixels > self.min_content:
-                    self.cur_tile_x = x
-                    self.cur_tile_y = y
-                    return r
-        # If we got to the end of the image, go back to the beginning and try again
-        self.cur_tile_x = 0
-        self.cur_tile_y = 0
+        meta = self.meta[r_stack]
+
+        # Compute the height and width of tiles (accounting for scaling)
+        if self.target_resolution is None:
+            scaling = 1
+        else:
+            scaling = self.target_resolution / meta.Resolution_XY
+        h = round(scaling * self.target_h)
+        w = round(scaling * self.target_w)
+
+        # Iterate through possible coordinates
+        max_tile_y = meta.Height - self.target_h + 1
+        max_tile_x = meta.Width - self.target_w + 1
+        coords = [
+            (y, x) for y in range(0, max_tile_y, h) for x in range(0, max_tile_x, w)
+        ]
+        np.random.shuffle(coords)
+        for coord in coords:
+            y, x = coord
+            r = self._get_sample(meta, r_stack, y, x, h, w, scaling, squeeze)
+            if r is None:
+                continue
+            # In either one or both annotations there should be at least `min_content` pixels
+            # that are labelled
+            dend_mask_pixels = (r[1]).sum()
+            spine_mask_pixels = (r[2]).sum()
+            if (
+                dend_mask_pixels > self.min_content
+                or spine_mask_pixels > self.min_content
+            ):
+                return r
+        # If no sample was found in this stack, try another one
         return self.get_sample(squeeze)
 
-    def _get_sample(self, x, y, r_stack, squeeze=True):
+    def _get_sample(self, meta, r_stack, y, x, h, w, scaling, squeeze=True):
         """Retrieves a sample
 
         Args:
@@ -252,41 +268,13 @@ class TiledDataGenerator(Sequence):
         Returns:
             tuple: Tuple of stack (X), dendrite (Y0) and spines (Y1)
         """
-        # Adjust for 2 dimensional images
-        if len(self.size) == 2:
-            size = (1,) + self.size
-        else:
-            size = self.size
-
-        # Sample random stack
-        meta = self.meta[r_stack]
-
-        # Get stack, spines and dendrites
-        stack_data = self.data["stacks"][f"x{r_stack}"]
-        dendrite_mask_data = self.data["dendrites"][f"x{r_stack}"]
-        spines_mask_data = self.data["spines"][f"x{r_stack}"]
-
-        target_h = size[1]
-        target_w = size[2]
-
-        if self.target_resolution is None:
-            # Keep everything as is
-            scaling = 1
-        else:
-            # Computing scaling factor
-            scaling = self.target_resolution / meta.Resolution_XY
-
-        # Compute the height and width and random offsets
-        h = round(scaling * target_h)
-        w = round(scaling * target_w)
-
-        # Correct for stack dimensions
+        # Correct x coordinate for stack dimensions
         if meta.Width-w == 0:
             x = 0
         elif meta.Width-w < 0:
             return
 
-        # Correct for stack dimensions
+        # Correct y coordinate for stack dimensions
         if meta.Height-h == 0:
             y = 0
         elif meta.Height-h < 0:
@@ -295,25 +283,38 @@ class TiledDataGenerator(Sequence):
         if x + w > meta.Width or y + h > meta.Height:
             return
 
-        # Select random plane + range
-        if (size[0] > meta.Depth-size[0]):
+        # Select random plane + range, if possible
+        if self.target_z > meta.Depth - self.target_z:
             return
+        z_begin = np.random.choice(meta.Depth - self.target_z + 1)
+        z_end = z_begin + self.target_z
 
-        z_begin = np.random.choice(meta.Depth-size[0]+1)
-        z_end = z_begin + size[0]
+        # Get stack, spines and dendrites
+        stack_data = self.data["stacks"][f"x{r_stack}"]
+        dendrite_mask_data = self.data["dendrites"][f"x{r_stack}"]
+        spines_mask_data = self.data["spines"][f"x{r_stack}"]
 
-        # Scale if neccessary to the correct dimensions
+        # Scale if necessary to the correct dimensions
         tmp_stack = stack_data[z_begin:z_end, y: y + h, x: x + w]
         tmp_dendrites = dendrite_mask_data[z_begin:z_end, y: y + h, x: x + w]
         tmp_spines = spines_mask_data[z_begin:z_end, y: y + h, x: x + w]
 
         # Sanity checks
         assert tmp_stack.shape == (
-            size[0], h, w), "Unexpected orig shape: {tmp_stack.shape} at x={x}, y={y}"
+            self.size[0],
+            h,
+            w,
+        ), "Unexpected orig shape: {tmp_stack.shape} at x={x}, y={y}"
         assert tmp_dendrites.shape == (
-            size[0], h, w), "Unexpected dendrite shape: {tmp_dendrites.shape} at x={x}, y={y}"
+            self.size[0],
+            h,
+            w,
+        ), "Unexpected dendrite shape: {tmp_dendrites.shape} at x={x}, y={y}"
         assert tmp_spines.shape == (
-            size[0], h, w), "Unexpected spines shape: {tmp_spines.shape} at x={x}, y={y}"
+            self.size[0],
+            h,
+            w,
+        ), "Unexpected spines shape: {tmp_spines.shape} at x={x}, y={y}"
 
         # Data needs to be rescaled
         if scaling != 1:
@@ -324,12 +325,20 @@ class TiledDataGenerator(Sequence):
             # Do this for each plane
             # and ensure that OpenCV is happy
             for i in range(tmp_stack.shape[0]):
-                return_stack.append(cv2.resize(
-                    tmp_stack[i], (target_h, target_w)))
-                return_dendrites.append(cv2.resize(tmp_dendrites[i].astype(
-                    np.uint8), (target_h, target_w)).astype(bool))
-                return_spines.append(cv2.resize(tmp_spines[i].astype(
-                    np.uint8), (target_h, target_w)).astype(bool))
+                return_stack.append(
+                    cv2.resize(tmp_stack[i], (self.target_h, self.target_w))
+                )
+                return_dendrites.append(
+                    cv2.resize(
+                        tmp_dendrites[i].astype(np.uint8),
+                        (self.target_h, self.target_w),
+                    ).astype(bool)
+                )
+                return_spines.append(
+                    cv2.resize(
+                        tmp_spines[i].astype(np.uint8), (self.target_h, self.target_w)
+                    ).astype(bool)
+                )
 
             return_stack = np.asarray(return_stack)
             return_dendrites = np.asarray(return_dendrites)
@@ -341,7 +350,6 @@ class TiledDataGenerator(Sequence):
             return_spines = tmp_spines
 
         if squeeze:
-            # Return sample
             return return_stack.squeeze(), return_dendrites.squeeze(), return_spines.squeeze()
 
         else:
