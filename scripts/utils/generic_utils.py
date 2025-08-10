@@ -133,15 +133,13 @@ def split_masks(stack):
     Dendrite mask doesn't necessarily have the same position always. It is detected by assuming
     that it has the highest amount of masked pixels from all the masks.
     """
-    max_pixel_count = 0
-    dendrite_idx = 0
-    for idx in range(1, stack.max() + 1):
-        pixel_count = np.sum(stack == idx)
-        if pixel_count > max_pixel_count:
-            max_pixel_count = pixel_count
-            dendrite_idx = idx
-    return [dendrite_idx]
-
+    if stack.min() == stack.max():
+        return []
+    if stack.min() + 1 == stack.max():
+        return [int(stack.max())]
+    labels, counts = np.unique(stack[stack > stack.min()], return_counts=True)
+    max_count_idx = np.argmax(counts)
+    return [int(labels[max_count_idx])]
 
 def label_masks(hdf5_mask):
     """Converts a list of binary 3D masks into a single labeled mask stack.
