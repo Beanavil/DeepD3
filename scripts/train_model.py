@@ -25,10 +25,9 @@ from tensorflow.keras.callbacks import ModelCheckpoint, CSVLogger, LearningRateS
 
 # Fixed training parameters
 res = 0.02  # Fixed to 20 nm, can be None for mixed resolution training
-sample_shape = (1, 256, 256)  # Bigger tiles since we have more resolution
 
 
-def train_model(in_folder: str, out_folder: str, animal: str):
+def train_model(in_folder: str, out_folder: str, animal: str, sample_shape: tuple):
     # Get all files from the four types (original stack, spines masks, dendrites masks, metadata).
     stack_files = glob.glob(f"{in_folder}/*_stack.tif")
     spines_files = glob.glob(f"{in_folder}/*_spines.tif")
@@ -206,9 +205,17 @@ if __name__ == "__main__":
         default=f"{current_folder}/images",
         help="Path to the folder containing the raw data. Default to 'images' on the current folder.",
     )
+    parser.add_argument(
+        "-s",
+        "--sample-shape",
+        default="1, 256, 256",
+        help='Comma-separated list of values corresponding to the depth, height and width of data tiles to generate. Default to "1, 256, 256"',
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
 
     args = parser.parse_args()
+
+    sample_shape = tuple(int(s.strip()) for s in args.sample_shape.split(","))
 
     # Add a logger and a log file.
     log_level = logging.INFO
@@ -256,7 +263,12 @@ if __name__ == "__main__":
         for subfolder in data_subfolders:
             if args.verbose:
                 log.info(f"    Training model on data from {subfolder}")
-            train_model(in_folder=subfolder, out_folder=out_folder, animal=animal)
+            train_model(
+                in_folder=subfolder,
+                out_folder=out_folder,
+                animal=animal,
+                sample_shape=sample_shape,
+            )
             if args.verbose:
                 log.info(f"    Finished training from {subfolder}")
         if args.verbose:
