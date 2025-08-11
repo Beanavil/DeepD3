@@ -11,3 +11,5 @@ matplotlib
 scipy
 argparse
 segmentation-models
+albumentations
+flammkuchen
