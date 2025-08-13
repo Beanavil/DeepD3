@@ -55,6 +55,32 @@ def get_medoid(mask, max_coords=10000):
     medoid_index = np.argmin(dists.sum(axis=1))
     return random_coords[medoid_index]
 
+laplacian_ker = np.array([[0, 1, 0], [1, -4, 1], [0, 1, 0]])
+
+
+def laplacian_response(img, pos):
+    z, y, x = pos
+    lap = 0.0
+    for j in range(-1, 2):
+        for i in range(-1, 2):
+            ny = y + j
+            nx = x + i
+            if 0 <= ny < img.shape[1] and 0 <= nx < img.shape[2]:
+                value = img[z, ny, nx]
+            else:
+                value = 0
+            lap += value * laplacian_ker[j + 1, i + 1]
+    return lap**2
+
+
+def laplacian_var(img, pos, size=2):
+    laplacian_values = [
+        laplacian_response(img, (pos[0], pos[1] + j, pos[2] + i))
+        for j in range(-size, size + 1)
+        for i in range(-size, size + 1)
+    ]
+    return np.var(laplacian_values)
+
 
 def floodfill_impl(
     img, initial_mask, dimg, min_threshold, forbidden_mask=None, dendrite_ff=False
@@ -122,6 +148,15 @@ def floodfill_impl(
 
     thres_seed = mz, my, mx
 
+    if not dendrite_ff:
+        # For blurry checks
+        blurry_vals = np.zeros_like((0,) * img.shape[0], dtype=np.float64)
+        y_coords, x_coords = zyx_coords[:, 1], zyx_coords[:, 2]
+        width = x_coords.max() - x_coords.min() + 1
+        height = y_coords.max() - y_coords.min() + 1
+        blurry_sec_size = max(width, height)
+        blurry_vals[thres_seed[0]] = laplacian_var(img, thres_seed, blurry_sec_size)
+
     # Loop over neighbors.
     while queue:
         z, y, x = queue.popleft()
@@ -142,6 +177,16 @@ def floodfill_impl(
         taylor_1_threshold = max(threshold + z_grad * delta_z, min_threshold)
         if img[z, y, x] < taylor_1_threshold:
             continue
+
+        # Final check: blurriness. Skip if spine region in z-slice is significantly blurrier than the seed's.
+        if not dendrite_ff:
+            if blurry_vals[z] == 0:
+                blurry_vals[z] = laplacian_var(img, (z, y, x), blurry_sec_size)
+            if (
+                blurry_vals[z] > 1.6 * blurry_vals[mz]
+                or blurry_vals[z] < 0.5 * blurry_vals[mz]
+            ):
+                continue
 
         # Add accepted voxel to the mask and its neighbors to the queue.
         final_mask[z, y, x] = True
