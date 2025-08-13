@@ -27,7 +27,9 @@ from tensorflow.keras.callbacks import ModelCheckpoint, CSVLogger, LearningRateS
 res = 0.02  # Fixed to 20 nm, can be None for mixed resolution training
 
 
-def train_model(in_folder: str, out_folder: str, animal: str, sample_shape: tuple):
+def train_model(
+    in_folder: str, out_folder: str, model_name: str, animal: str, sample_shape: tuple
+):
     # Get all files from the four types (original stack, spines masks, dendrites masks, metadata).
     stack_files = glob.glob(f"{in_folder}/*_stack.tif")
     spines_files = glob.glob(f"{in_folder}/*_spines.tif")
@@ -91,7 +93,9 @@ def train_model(in_folder: str, out_folder: str, animal: str, sample_shape: tupl
     # Separate training and test (validation) data.
     # By default, train_test_split will use a random 25% of the available data for validation and
     # the complementary, 75%, for training. We pass and int as random state for reproducible trainings.
-    train_stack_list, validate_stack_list =  train_test_split(stack_list, random_state=42)
+    train_stack_list, validate_stack_list = train_test_split(
+        stack_list, random_state=42
+    )
 
     # Create the tiled samples from raw images and (for spines, floodfilled) masks.
     if args.verbose:
@@ -126,11 +130,11 @@ def train_model(in_folder: str, out_folder: str, animal: str, sample_shape: tupl
     # Train model.
     # Save best model automatically during training.
     mc = ModelCheckpoint(
-        f"{out_folder}/DeepD3_trained_model_{animal}.h5", save_best_only=True
+        f"{out_folder}/DeepD3_{model_name}_model_{animal}.h5", save_best_only=True
     )
 
     # Save metrics.
-    csv = CSVLogger(f"{out_folder}/DeepD3_test_model_{animal}.csv")
+    csv = CSVLogger(f"{out_folder}/DeepD3_{model_name}_metrics_{animal}.csv")
 
     # Adjust learning rate during training to allow for better convergence.
     lrs = LearningRateScheduler(schedule)
@@ -194,6 +198,12 @@ if __name__ == "__main__":
         help="Path to the folder to contain the trained models, relative to args.path. Default to 'models' (that is, args.path/models).",
     )
     parser.add_argument(
+        "-n",
+        "--model-name",
+        default="trained",
+        help="Name for the resulting model, so that the final model and metrics filenames are 'DeepD3_<model_name>_[model,metrics]_<animal_name>.[h5,csv]'. Default to 'trained'.",
+    )
+    parser.add_argument(
         "-o",
         "--preproc-out-folder",
         default="processed",
@@ -254,26 +264,29 @@ if __name__ == "__main__":
     }
 
     animals_data.pop(args.out_models_folder, None)
+    out_folder = f"{data_folder}/{args.out_models_folder}"
+    mode = "floodfilling" if args.floodfill else "model training"
+    if not args.floodfill:
+        os.makedirs(out_folder, exist_ok=True)
 
     for animal, data_subfolders in animals_data.items():
         if args.verbose:
-            log.info(f"Training model for {animal}")
-        out_folder = f"{data_folder}/{args.out_models_folder}/{animal}"
-        if not args.floodfill: os.makedirs(out_folder, exist_ok=True)
+            log.info(f"Started {mode} for {animal}")
         for subfolder in data_subfolders:
             if args.verbose:
-                log.info(f"    Training model on data from {subfolder}")
+                log.info(f"    Reading data from {subfolder}")
             train_model(
                 in_folder=subfolder,
                 out_folder=out_folder,
+                model_name=args.model_name,
                 animal=animal,
                 sample_shape=sample_shape,
             )
             if args.verbose:
-                log.info(f"    Finished training from {subfolder}")
+                log.info(f"    Finished {mode} from {subfolder}")
         if args.verbose:
             log.info(
-                f"Finished training model for {animal}. Model written to {out_folder}"
+                f"Finished {mode} for {animal}. {"Floodfilled spines" if args.floodfill else "Model"} written to {subfolder if args.floodfill else out_folder}"
             )
 
     if args.verbose:
