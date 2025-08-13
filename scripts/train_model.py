@@ -118,7 +118,7 @@ def train_model(in_folder: str, out_folder: str, animal: str, sample_shape: tupl
         optimizer=Adam(learning_rate=args.learning_rate),
         # Dice loss for dendrite, MSE for spines.
         loss=[sm.losses.dice_loss, "mse"],
-        metrics=["acc", sm.metrics.iou_score],
+        metrics=[sm.metrics.iou_score, sm.metrics.iou_score],
     )
     if args.verbose:
         log.info(model.summary())

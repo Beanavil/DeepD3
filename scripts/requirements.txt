@@ -1,4 +1,4 @@
-tensorflow>=2.0
+tensorflow[and-cuda]
 opencv-python
 h5py
 numpy

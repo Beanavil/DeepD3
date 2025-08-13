@@ -5,7 +5,6 @@ import cv2
 import json
 import h5py
 import math
-import tensorflow
 import numpy as np
 import tifffile as tf
 from scipy import ndimage
@@ -126,6 +125,7 @@ def process_obf(obf_path, base, out_folder, log):
     except Exception as e:
         log.warning(f"Skipping {obf_path} due to error: {e}")
         return
+
 
 def split_masks(stack):
     """Splits masks into dendrites and spines.
@@ -255,4 +255,4 @@ def schedule(epoch, lr):
         return lr
 
     else:
-        return lr * tensorflow.math.exp(-0.1)
+        return lr * math.exp(-0.1)

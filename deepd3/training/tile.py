@@ -100,15 +100,11 @@ class TiledDataGenerator(Sequence):
             img = tifffile.imread(self.fn[i]['img'])
             d_mask = tifffile.imread(self.fn[i]['d_mask'])
             s_masks = tifffile.imread(self.fn[i]['s_masks'])
-            # Original images are stored as (Z, X, Y)
-            img = np.transpose(img, axes=(0, 2, 1))
-            d_mask = np.transpose(d_mask, axes=(0, 2, 1))
-            s_masks = np.transpose(s_masks, axes=(0, 2, 1))
             # Load metadata following d3set format
             MetaEntry = namedtuple(
                 'MetaEntry', ['Height', 'Width', 'Depth', 'Resolution_XY', 'Resolution_Z'])
-            z, x, y = self.fn[i]['meta']['stack_shapes']['sizes']
-            res_z, res_x, res_y = self.fn[i]['meta']['pixel_sizes']['sizes']
+            z, y, x = self.fn[i]['meta']['stack_shapes']['sizes']
+            res_z, res_y, res_x = self.fn[i]['meta']['pixel_sizes']['sizes']
             meta_entry = MetaEntry(
                 Height=y,
                 Width=x,
