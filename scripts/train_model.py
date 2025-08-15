@@ -98,9 +98,10 @@ def train_model(
 
     # Separate training and test (validation) data.
     # By default, train_test_split will use a random 25% of the available data for validation and
-    # the complementary, 75%, for training. We pass and int as random state for reproducible trainings.
+    # the complementary, 75%, for training. Instead, we use 20-80% split.
+    # We additionally pass an int as random state for reproducible trainings.
     train_stack_list, validate_stack_list = train_test_split(
-        stack_list, random_state=42
+        stack_list, test_size=0.2, train_size=0.8, random_state=42
     )
 
     # Create the tiled samples from raw images and (for spines, floodfilled) masks.
