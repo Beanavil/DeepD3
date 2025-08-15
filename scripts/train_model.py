@@ -2,6 +2,7 @@
 from deepd3.model import DeepD3_Model
 from deepd3.utils.floodfill import floodfill_stacks
 from deepd3.training.tile import TiledDataGenerator, Stack
+from scripts.utils.vanilla_unet import VanillaUnet_Model
 
 # Set keras framework
 import os
@@ -28,7 +29,12 @@ res = 0.02  # Fixed to 20 nm, can be None for mixed resolution training
 
 
 def train_model(
-    in_folder: str, out_folder: str, model_name: str, animal: str, sample_shape: tuple
+    in_folder: str,
+    out_folder: str,
+    model_name: str,
+    animal: str,
+    sample_shape: tuple,
+    is_vanilla: bool,
 ):
     # Get all files from the four types (original stack, spines masks, dendrites masks, metadata).
     stack_files = glob.glob(f"{in_folder}/*_stack.tif")
@@ -114,8 +120,11 @@ def train_model(
     )
 
     # Compile model.
-    # Create a naive DeepD3 model with a given base filter count.
-    model = DeepD3_Model(filters=args.filters)
+    # First, invert sample shape to get (z, y, x).
+    if is_vanilla:
+        model = VanillaUnet_Model(filters=args.filters)
+    else:
+        model = DeepD3_Model(filters=args.filters)
 
     # Set appropriate training settings
     model.compile(
@@ -130,11 +139,14 @@ def train_model(
     # Train model.
     # Save best model automatically during training.
     mc = ModelCheckpoint(
-        f"{out_folder}/DeepD3_{model_name}_model_{animal}.h5", save_best_only=True
+        f"{out_folder}/{"VanillaUnet" if is_vanilla else "DeepD3"}_{model_name}_model_{animal}.h5",
+        save_best_only=True,
     )
 
     # Save metrics.
-    csv = CSVLogger(f"{out_folder}/DeepD3_{model_name}_metrics_{animal}.csv")
+    csv = CSVLogger(
+        f"{out_folder}/{"VanillaUnet" if is_vanilla else "DeepD3"}_{model_name}_metrics_{animal}.csv"
+    )
 
     # Adjust learning rate during training to allow for better convergence.
     lrs = LearningRateScheduler(schedule)
@@ -221,6 +233,12 @@ if __name__ == "__main__":
         default="1, 256, 256",
         help='Comma-separated list of values corresponding to the depth, height and width of data tiles to generate. Default to "1, 256, 256"',
     )
+    parser.add_argument(
+        "-vu",
+        "--vanilla-unet",
+        action="store_true",
+        help="Whether to train the vanilla U-Net or DeepD3.",
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
 
     args = parser.parse_args()
@@ -281,6 +299,7 @@ if __name__ == "__main__":
                 model_name=args.model_name,
                 animal=animal,
                 sample_shape=sample_shape,
+                is_vanilla=args.vanilla_unet,
             )
             if args.verbose:
                 log.info(f"    Finished {mode} from {subfolder}")
