@@ -169,6 +169,7 @@ def train_model(
             """Callback class to measure average time taken per batch."""
             self.time_start = None
             self.time_epochs = []
+            self.time_batches = []
             self.out_filename = out_filename
             self.batches_per_epoch = dg_training.steps_per_epoch
             sample_shape_str = (
@@ -182,18 +183,23 @@ def train_model(
             if not os.path.isfile(out_filename):
                 with open(self.out_filename, mode="w", newline="") as f:
                     w = csv.writer(f)
-                    w.writerow(["model", "avg_epoch_time_ms"])
+                    w.writerow(["model", "avg_batch_time_ms"])
 
-        def on_epoch_begin(self, epoch, logs=None):
+        def on_train_batch_begin(self, batch, logs=None):
             self.time_start = timer()
 
-        def on_epoch_end(self, epoch, logs=None):
+        def on_train_batch_end(self, batch, logs=None):
             time_end = timer()
-            epoch_time_ms = (time_end - self.time_start) * 1000
-            self.time_epochs.append(epoch_time_ms)
+            self.time_batches.append(time_end - self.time_start)
+
+        def on_epoch_end(self, epoch, logs=None):
+            batch_avgtime = np.array(self.time_batches).mean() * 1000
+            self.time_batches = []
+            self.time_epochs.append(batch_avgtime)
 
         def on_train_end(self, logs=None):
             epoch_avgtime = np.array(self.time_epochs).mean()
+            self.time_epochs = []
             with open(self.out_filename, mode="a", newline="") as f:
                 w = csv.writer(f)
                 w.writerow([self.model_name, epoch_avgtime])
