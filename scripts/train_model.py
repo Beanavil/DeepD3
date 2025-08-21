@@ -12,17 +12,25 @@ import segmentation_models as sm
 from scripts.utils.generic_utils import add_file, schedule
 
 # Others
+import csv
 import glob
 import json
 import logging
 import pathlib
 import argparse
+import numpy as np
 import rich.logging
 from itertools import groupby
 from collections import defaultdict
+from timeit import default_timer as timer
 from tensorflow.keras.optimizers import Adam
 from sklearn.model_selection import train_test_split
-from tensorflow.keras.callbacks import ModelCheckpoint, CSVLogger, LearningRateScheduler
+from tensorflow.keras.callbacks import (
+    Callback,
+    ModelCheckpoint,
+    CSVLogger,
+    LearningRateScheduler,
+)
 
 # Fixed training parameters
 res = 0.02  # Fixed to 20 nm, can be None for mixed resolution training
@@ -140,14 +148,56 @@ def train_model(
     # Train model.
     # Save best model automatically during training.
     mc = ModelCheckpoint(
-        f"{out_folder}/{"VanillaUnet" if is_vanilla else "DeepD3"}_{model_name}_model_{animal}.h5",
+        os.path.join(
+            out_folder,
+            f"{"VanillaUnet" if is_vanilla else "DeepD3"}_{model_name}_model_{animal}.h5",
+        ),
         save_best_only=True,
     )
 
     # Save metrics.
-    csv = CSVLogger(
-        f"{out_folder}/{"VanillaUnet" if is_vanilla else "DeepD3"}_{model_name}_metrics_{animal}.csv"
+    csvl = CSVLogger(
+        os.path.join(
+            out_folder,
+            f"{"VanillaUnet" if is_vanilla else "DeepD3"}_{model_name}_metrics_{animal}.csv",
+        )
     )
+
+    # Time training
+    class TimingCallback(Callback):
+        def __init__(self, out_filename):
+            """Callback class to measure average time taken per batch."""
+            self.time_start = None
+            self.time_epochs = []
+            self.out_filename = out_filename
+            self.batches_per_epoch = dg_training.steps_per_epoch
+            sample_shape_str = (
+                str(sample_shape)
+                .replace(",", "-")
+                .replace("(", "")
+                .replace(")", "")
+                .replace(" ", "")
+            )
+            self.model_name = f"{"VanillaUnet" if is_vanilla else "DeepD3"}_f{args.filters}_bs{args.batch_size}_e{args.epochs}_s{sample_shape_str}_dice_mse{"_base" if "base" in out_folder else ""}"
+            if not os.path.isfile(out_filename):
+                with open(self.out_filename, mode="w", newline="") as f:
+                    w = csv.writer(f)
+                    w.writerow(["model", "avg_epoch_time_ms"])
+
+        def on_epoch_begin(self, epoch, logs=None):
+            self.time_start = timer()
+
+        def on_epoch_end(self, epoch, logs=None):
+            time_end = timer()
+            epoch_time_ms = (time_end - self.time_start) * 1000
+            self.time_epochs.append(epoch_time_ms)
+
+        def on_train_end(self, logs=None):
+            epoch_avgtime = np.array(self.time_epochs).mean()
+            with open(self.out_filename, mode="a", newline="") as f:
+                w = csv.writer(f)
+                w.writerow([self.model_name, epoch_avgtime])
+    tc = TimingCallback(out_filename=os.path.join(out_folder, "training_time.csv"))
 
     # Adjust learning rate during training to allow for better convergence.
     lrs = LearningRateScheduler(schedule)
@@ -158,7 +208,7 @@ def train_model(
         batch_size=dg_training.batch_size,
         epochs=args.epochs,
         validation_data=dg_validation,
-        callbacks=[mc, csv, lrs],
+        callbacks=[mc, csvl, lrs, tc],
     )
 
 
