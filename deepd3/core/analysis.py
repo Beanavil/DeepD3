@@ -4,6 +4,7 @@ import imageio as io
 import flammkuchen as fl
 import os
 import cv2
+from tensorflow.keras.models import load_model
 from skimage.measure import find_contours, moments
 from skimage.feature import peak_local_max
 from skimage.segmentation import watershed
@@ -536,8 +537,8 @@ class Stack(QObject):
 
         predictions = np.zeros(stack_zp.shape + (3,), dtype=np.float32)
 
-        steps_y = np.arange(0, h, inset_size).astype(np.int)
-        steps_x = np.arange(0, w, inset_size).astype(np.int)
+        steps_y = np.arange(0, h, inset_size).astype(np.int32)
+        steps_x = np.arange(0, w, inset_size).astype(np.int32)
 
         # Iterate over tiles, y
         for i in tqdm(steps_y):
@@ -578,8 +579,6 @@ class Stack(QObject):
         Returns:
             bool: operation was successful
         """
-        from tensorflow.keras.models import load_model
-
         model = load_model(model_fn, compile=False)
 
         # Iterate over tiles, y
@@ -648,8 +647,8 @@ class Stack(QObject):
         # Predict stack 4 times with different offsets to ensure
         # that the prediction is properly done at the edges
         for it, (start_y, start_x) in enumerate([(0, 0), (tile_size//2, 0), (0, tile_size//2), (tile_size//2, tile_size//2)]):
-            steps_y = np.arange(start_y, self.stack.shape[1], inset_size).astype(np.int)
-            steps_x = np.arange(start_x, self.stack.shape[2], inset_size).astype(np.int)
+            steps_y = np.arange(start_y, self.stack.shape[1], inset_size).astype(np.int32)
+            steps_x = np.arange(start_x, self.stack.shape[2], inset_size).astype(np.int32)
 
             # Iterate over tiles, y
             for i in tqdm(steps_y):
