@@ -319,13 +319,14 @@ if __name__ == "__main__":
     data_folder = args.path
     preproc_folder = f"{data_folder}/{args.preproc_out_folder}"
 
-    # Validate existence of folder
     if not os.path.exists(data_folder):
         parser.error(f"Folder {data_folder} does not exist")
+        exit()
     if not os.path.exists(preproc_folder):
         parser.error(
             f"Folder {preproc_folder} does not exist. The raw data must be already preprocessed and placed into {preproc_folder}"
         )
+        exit()
 
     # Validate existence of subfolders with preprocessed data for each animal
     subfolders = [f.path for f in os.scandir(preproc_folder) if f.is_dir()]

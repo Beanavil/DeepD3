@@ -176,7 +176,9 @@ if __name__ == "__main__":
 
     # Validate input folder(s) existence and create output folder
     data_folder = args.path
-    out_folder = os.path.join(data_folder, f"inference_{"gpu" if args.run_gpu else "cpu"}")
+    out_folder = os.path.join(
+        data_folder, f"{args.out_folder_prefix}_{"gpu" if args.run_gpu else "cpu"}"
+    )
     bench_folder = os.path.join(
         data_folder, os.path.join(args.benchmark_folder, args.animal)
     )

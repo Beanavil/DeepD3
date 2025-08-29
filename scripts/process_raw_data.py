@@ -103,9 +103,9 @@ if __name__ == '__main__':
     # Validate input folder contents.
     data_folder = args.path
 
-    # Validate existence of folder.
     if not os.path.exists(data_folder):
         parser.error(f'Folder {data_folder} does not exist')
+        exit()
     subfolders = [f.path for f in os.scandir(data_folder) if f.is_dir()]
     subfolders.sort()
 
@@ -120,6 +120,7 @@ if __name__ == '__main__':
         parser.error(
             'There must be at least one data folder for one of the animals (turtel, mice)'
         )
+        exit()
 
     # Remove unexpected folders.
     valid_animals = [a.strip() for a in args.animals.split(',')]

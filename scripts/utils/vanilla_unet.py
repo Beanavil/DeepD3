@@ -6,7 +6,7 @@ from tensorflow.keras.layers import (
     MaxPool2D,
     UpSampling2D,
     Activation,
-    Add,
+    BatchNormalization,
 )
 
 
@@ -24,6 +24,7 @@ def convlayer(x, filters, activation, name):
         Keras.layer: Full convolutional procedure
     """
     x = Conv2D(filters, 3, padding="same", use_bias=True, name=name)(x)
+    x = BatchNormalization(name=name+"_BN")(x)
     x = Activation(activation, name=name + "_activation")(x)
     return x
 
