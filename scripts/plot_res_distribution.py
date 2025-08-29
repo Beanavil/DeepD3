@@ -112,8 +112,8 @@ if __name__ == "__main__":
         "-fw",
         "--fig-width",
         type=float,
-        default=180,
-        help="Figure width for resolution distribution plot, in millimeters. Default to 180.",
+        default=90,
+        help="Figure width for resolution distribution plot, in millimeters. Default to 90.",
     )
     parser.add_argument(
         "-s",
@@ -132,13 +132,11 @@ if __name__ == "__main__":
     matplotlib.rcParams['font.family'] = "sans-serif"
     matplotlib.rcParams["font.sans-serif"] = "Helvetica"
 
-    # Add a logger and a log file.
+    # Add a logger
     log_level = logging.INFO
-    log_file = os.path.join(args.path, "res_distribution_log.txt")
     logging.basicConfig(
         format="%(message)s",
         handlers=[
-            logging.FileHandler(log_file, mode="a"),
             rich.logging.RichHandler(console=None, rich_tracebacks=True, markup=True),
         ],
         level=log_level,
@@ -149,13 +147,14 @@ if __name__ == "__main__":
     data_folder = args.path
     preproc_folder = f"{data_folder}/{args.preproc_out_folder}"
 
-    # Validate existence of folder
     if not os.path.exists(data_folder):
         parser.error(f"Folder {data_folder} does not exist")
+        exit()
     if not os.path.exists(preproc_folder):
         parser.error(
             f"Folder {preproc_folder} does not exist. The raw data must be already preprocessed and placed into {preproc_folder}"
         )
+        exit()
 
     # Validate existence of subfolders with preprocessed data for each animal
     subfolders = [f.path for f in os.scandir(preproc_folder) if f.is_dir()]

@@ -141,6 +141,7 @@ def split_masks(stack):
     max_count_idx = np.argmax(counts)
     return [int(labels[max_count_idx])]
 
+
 def label_masks(hdf5_mask):
     """Converts a list of binary 3D masks into a single labeled mask stack.
 
@@ -256,3 +257,13 @@ def schedule(epoch, lr):
 
     else:
         return lr * math.exp(-0.1)
+
+
+def variant_ordering_key(fname):
+    match = re.match(r"(([a-zA-Z0-9_/ ]*)_f([\d]+))", str(fname))
+    extra = 64 if match.group(2) == "VanillaUnet" else 0
+    return int(match.group(3)) + extra if match else float("inf")
+
+
+def variant_ordering_series_key(series):
+    return series.apply(lambda fname: variant_ordering_key(fname))
