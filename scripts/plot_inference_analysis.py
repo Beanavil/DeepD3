@@ -28,6 +28,7 @@ def analyze(
     metrics_results = []
     gt_spines = gt_spines
     for b in range(len(gt_spines)):
+        print(f"processing benchmark {b}")
         bench = gt_spines[b]
         ground_truth = tifffile.imread(bench)
         ground_truth = (ground_truth > 0).astype(bool)
@@ -76,7 +77,7 @@ def analyze_seg_quality(
         out_tables_folder=out_tables_folder,
         caption=(
             "Segmentation quality metrics for different DeepD3 scaling variants "
-            "(8, 16, 32 and 64 filters)."
+            "(8, 16, 32 and 64 filters) and Vanilla Unet."
         ),
         label=f"tab:seg_quality_metrics_{suffix}",
         suffix=suffix,
@@ -115,7 +116,7 @@ def analyze_seg_agreement(
         out_tables_folder=out_tables_folder,
         caption=(
             "Segmentation agreement metrics for different DeepD3 scaling variants "
-            "(8, 16, 32 and 64 filters)."
+            "(8, 16, 32 and 64 filters) and Vanilla Unet."
         ),
         label=f"tab:seg_agreement_metrics_{suffix}",
         suffix=suffix,
@@ -142,18 +143,45 @@ def analyze_diff():
     base_qual_df = pd.read_csv(
         os.path.join(out_plots_folder, f"metrics_quality_deepd3_base.csv")
     )
-    # Normality tests
-    print_shapiro_res(shapiro(deepd3_qual_df["recall"]))
-    print_shapiro_res(shapiro(base_qual_df["recall"]))
-    # Analysis of variance
-    print_kruskall_res(kruskal(deepd3_qual_df["recall"], base_qual_df["recall"]))
-
     deepd3_agree_df = pd.read_csv(
         os.path.join(out_plots_folder, f"metrics_agreement_deepd3.csv")
     )
     base_agree_df = pd.read_csv(
         os.path.join(out_plots_folder, f"metrics_agreement_deepd3_base.csv")
     )
+    ### Analyse differences in DeepD3 models ###
+    # Normality tests
+    for _, s in deepd3_qual_df.groupby("DeepD3 scaling variant"):
+        print_shapiro_res(shapiro(s["recall"].values))
+
+    # Analysis of variance
+    samples = [
+        s["recall"].values for _, s in deepd3_qual_df.groupby("DeepD3 scaling variant")
+    ]
+    print_kruskall_res(kruskal(*samples))
+
+    # Normality tests
+    for _, s in deepd3_agree_df.groupby("DeepD3 scaling variant"):
+        print_shapiro_res(shapiro(s["IoU"].values))
+        print_shapiro_res(shapiro(s["NSD"].values))
+
+    # Analysis of variance
+    samples = [
+        s["IoU"].values for _, s in deepd3_agree_df.groupby("DeepD3 scaling variant")
+    ]
+    print_kruskall_res(kruskal(*samples))
+    samples = [
+        s["NSD"].values for _, s in deepd3_agree_df.groupby("DeepD3 scaling variant")
+    ]
+    print_kruskall_res(kruskal(*samples))
+
+    ### Analyse differences between the base and floodfilled models ###
+    # Normality tests
+    print_shapiro_res(shapiro(deepd3_qual_df["recall"]))
+    print_shapiro_res(shapiro(base_qual_df["recall"]))
+    # Analysis of variance
+    print_kruskall_res(kruskal(deepd3_qual_df["recall"], base_qual_df["recall"]))
+
     # Normality test
     print_shapiro_res(shapiro(deepd3_agree_df["IoU"]))
     print_shapiro_res(shapiro(base_agree_df["IoU"]))

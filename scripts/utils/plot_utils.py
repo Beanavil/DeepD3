@@ -2,6 +2,7 @@ import re
 import os
 import numpy as np
 import surface_distance
+import scipy.ndimage as ndi
 import matplotlib.pyplot as plt
 from sklearn.metrics import recall_score, jaccard_score
 
@@ -184,6 +185,24 @@ def plot_train_iou(models_dfs, y_min, y_max, out_folder):
     plt.close()
 
 
+def recall_spines(ground_truth, prediction):
+    """Computes recall at a spine level and averages the results over the number of spines."""
+    L, _ = ndi.label(ground_truth)
+    gt_labels = np.unique(L)
+    gt_labels = gt_labels[gt_labels != 0]
+    # For each spine (label) from the ground truth, we want to find out how much of it was successfully
+    # detected in the prediction. For that, it is enough to consider the same pixels from the prediction
+    # because ouside of these we would be counting either false positives (positive in prediction but
+    # negative in ground truth) or true negatives (negatives in both), and for recall we are only
+    # interested in true positives (positive in both) and false negatives (positive in ground truth but
+    # negative in prediction).
+    recall = 0
+    for gt_label_id in gt_labels:
+        label_mask = L == gt_label_id
+        recall += prediction[label_mask].mean()
+    return recall / gt_labels.size
+
+
 # Inference plots utilities
 def compute_infer_metrics(ground_truth, prediction, metrics):
     """Computes the metrics for the inference benchmarking data.
@@ -192,9 +211,11 @@ def compute_infer_metrics(ground_truth, prediction, metrics):
     """
     results = {}
     if "recall" in metrics:
-        results["recall"] = recall_score(
-            ground_truth.flatten(), prediction.flatten(), zero_division=0
-        )
+        # results["recall"] = recall_score(
+        #     ground_truth.flatten(), prediction.flatten(), zero_division=0
+        # )
+        results["recall"] = recall_spines(ground_truth, prediction)
+        print(f"recall {results["recall"]}")
     if "IoU" in metrics:
         results["IoU"] = jaccard_score(
             ground_truth.flatten(), prediction.flatten(), zero_division=0
@@ -240,6 +261,7 @@ def plot_infer_metrics(metrics_df, x_max, out_plots_folder, suffix="deepd3"):
             )
         ax.set_title(f"{metric} across benchmarks")
         ax.set_ylabel(metric)
+        ax.set_xlabel("Benchmark idx")
         ax.set_xticks(ticks=x, labels=[label for label in x_labels])
         ax.set_yticks(ticks=y, labels=[label for label in y_labels])
         # ax.legend(bbox_to_anchor=(1.17, 1), loc=1, frameon=True)
