@@ -148,3 +148,4 @@ test_images/
 # extra
 rough.ipynb
 tests/results
+tests/test_images
